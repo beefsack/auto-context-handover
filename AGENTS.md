@@ -8,6 +8,7 @@
 ## Live Testing
 
 - Before any live or model-invoked testing, follow the isolated manual plan in `README.md` (separate `/tmp/opencode` directory, never the live config). This does not grant mutation authorization.
+- Ask the user to choose the model explicitly for each live test run. Require that model as a per-run argument or environment variable with no default; never hardcode or select a model in test files, scripts, or configs.
 
 ## Local-System Information
 

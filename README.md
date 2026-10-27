@@ -108,6 +108,30 @@ config): create `/tmp/opencode/ch-manual`, put an `opencode.jsonc` with the
 Use `{ "soft": 2000 }` (or similar) so one short exchange crosses the
 threshold; the model does the calling, you verify the outcomes.
 
+Ask the user to choose the model explicitly for each live run, and pass it
+as a required per-run argument or environment variable with no default.
+Never hardcode or pick a model in test files, scripts, or configs. If the
+chosen model is rejected, stop rather than substitute another model.
+Give sessions explicit titles so automatic title generation cannot select
+a different model for an auxiliary request.
+
+For headless checks, require the chosen model in the invoking environment:
+
+```sh
+: "${LIVE_TEST_MODEL:?Set the model explicitly chosen for this run}"
+opencode run --model "$LIVE_TEST_MODEL" --title "Handover check" --format json "What is 1234 + 5678? Reply exactly SUM-6912. Do not call any tools."
+: "${SESSION_ID:?Set sessionID from the run's JSON events}"
+opencode session export "$SESSION_ID" > session.json
+```
+
+Run these commands from the isolated project. Obtain `SESSION_ID` from the
+run's JSON events; exported tool entries use `.name`, not `.tool`.
+First verify ordinary completion without asking for a handover: no usage
+anchor exists on the first request, so it should not nudge or hand over.
+Then continue that session to cross the threshold. A context-hook observer
+loaded after this plugin can independently record remaining tool names and
+injected directives; a model's description of its tools alone is not proof.
+
 1. New-session rotation (local directory config).
    Do: with `soft` low, ask the agent to complete a small unit and then call
    `context_handover` with full text plus summary. Nudges are model-facing,
@@ -123,6 +147,8 @@ threshold; the model does the calling, you verify the outcomes.
    `context_handover`.
    Expect: no successor is created; the result names the stored session ID
    and points at `read_handover`; the session locks and keeps no tools.
+   Later work requests should refuse and direct the user to read that
+   stored text from another session.
 
 3. Child return and parent read.
    Do: from a parent session, launch a subagent that crosses soft and calls
@@ -148,6 +174,12 @@ threshold; the model does the calling, you verify the outcomes.
    Expect: s3 locks with "loop guard" and no new root; the productive chain
    resets the streak, then counts up and locks on the third short one.
    Counts are approximate, so do not expect exact manual outcomes.
+   Keep transcripts short even with a larger soft threshold: fixed
+   system/tool overhead counts as added tokens, so tiny thresholds can
+   classify a sentence-only successor as productive. Explicitly request
+   handovers below soft rather than filling the window just to get nudged.
+   Separately, with `soft` 1000, a handover body over 2000 characters
+   ensures the full seed exceeds 50% of soft; expect a warning, not a block.
 
 6. Forward/back links and read after compaction.
    Do: complete one rotation, then keep working in the successor until
@@ -184,8 +216,8 @@ threshold; the model does the calling, you verify the outcomes.
 - No reset/draft actions: unsupported values are explicit setup errors.
 - Compaction can drop the visible estimate; the hook keeps a high-water mark
   so pre-compaction progress still counts at handover.
-- The rename is verified by `npm run typecheck`, `npm test`, and
-  `npm pack --dry-run`. Earlier isolated OpenCode 2.1.4 checks confirmed
-  session creation and plugin activation before the rename, without model
-  prompts. Live activation under the new id and end-to-end model behavior
-  remain unverified.
+- Isolated OpenCode 2.1.4 live checks confirm lock mode, hard tool removal
+  with a callable handover, linked rollover, default-variant preservation,
+  the seed-size warning, and locking on the third unproductive successor.
+  Nondefault variants, productive loop-streak reset, and readback after
+  compaction were not exercised in these live runs.

@@ -16,6 +16,12 @@
 - Rollover errors preserve the text and expose the successor ID and lock state. Same-process retries reuse partially created successors; uncertain prompt admission after locking requires user recovery. Crash atomicity between create and link persistence is not guaranteed.
 - Call `context_handover` only after the plugin's context-limit nudge or an explicit user handover request, never as normal task completion; once nudged, finish the current unit of work first. This is wording guidance only, not dynamic tool hiding or early-call rejection; `handoverDescription` still replaces the default wholesale.
 
+## Live verification (2026-10-27)
+
+- OpenCode 2.1.4 honors deletion from the context hook's tool record: an isolated hard-limit request exposed only `context_handover`, and its model-authored handover completed. This settles the earlier research's partial tools-off grade; it does not establish an execution-time deny or run-abort primitive.
+- Isolated live roots rotated with forward/back links and retained the `default` variant. Separate checks observed the >50%-of-soft seed warning and a root followed by exactly three unproductive successors, with the third locked and no fourth created. Loop checking used a larger absolute soft threshold with short exchanges so fixed prompt/tool overhead stayed below 25% of soft; large transcripts are unnecessary.
+- Primary locked-request guidance prescribes a refusal containing the source session ID and a `read_handover` hint for another session. Appending an advisory reader hint alone did not survive model paraphrasing in a live check; prescribing the refusal did. Child return replies remain unchanged. This remains model-facing guidance, not deterministic output interception.
+
 ## Project name (2026-10-27)
 
 - User chose `auto-context-handover` after an originality check; package name and plugin id use it, while tool names `context_handover` and `read_handover` stay unchanged. Keep the existing repository directory until the user renames it. The id change makes prior plugin-namespaced KV handovers, links, locks, and loop state inaccessible; this test-data loss is accepted, with no migration.

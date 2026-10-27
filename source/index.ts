@@ -140,7 +140,7 @@ export default Plugin.define({
           try {
             const existingLock = asStoredLock(await readStrict(ctx, keys.lock(sessionID), "source lock"))
             if (existingLock) {
-              return { content: `${buildLockedDirective(existingLock.reason)} Handover not recorded; this session is already locked.` }
+              return { content: `${buildLockedDirective(existingLock.reason, sessionID)} Handover not recorded; this session is already locked.` }
             }
             const info = await ctx.session.get({ sessionID }).catch((error: unknown) => {
               throw new Tool.Error({
@@ -441,7 +441,7 @@ export default Plugin.define({
         if (locked) {
           for (const name of Object.keys(event.tools)) delete event.tools[name]
           event.messages.push(
-            Message.system(locked.finalReply ? buildLockedFinalReply(locked.reason, locked.finalReply) : buildLockedDirective(locked.reason)),
+            Message.system(locked.finalReply ? buildLockedFinalReply(locked.reason, locked.finalReply) : buildLockedDirective(locked.reason, event.sessionID)),
           )
           return
         }

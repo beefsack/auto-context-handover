@@ -182,7 +182,7 @@ Rollover here means new session + seed + UI switch. File snapshots alone never c
 
 | Harness | Trigger (measured soft threshold from inside) | Warn (user-visible) | Hard-stop (tools-off gate) | Rollover | Subagent return |
 | --- | --- | --- | --- | --- | --- |
-| OpenCode | Y (context hook + model list + delta estimate) | Y (inject warning) | P (message/maxTokens mutation; no deny primitive in baseline) | Y (create/prompt + TUI navigate + review; web P) | Y (final text; multi-message caveat) |
+| OpenCode | Y (context hook + model list + delta estimate) | Y (inject warning) | Y (delete context-hook tool entries; live 2.1.4 check retained only callable handover; not a deny/abort primitive) | Y (create/prompt + TUI navigate + review; web P) | Y (final text; multi-message caveat) |
 | Claude settings | P (per-turn/batch/tool only) | Y | Y (deny) | P headless only; N interactive from hooks | Y |
 | Claude mods | Y (`turn.step` + `result.usage`) | Y (`$.ui.log/ask/render`) | Y (`tool.call`/`tool.check` deny) | U (no verified session/UI API in fetched docs) | Y (`e.agentId`) |
 | Codex | P (no per-request; PreCompact gate exists) | Y | Y (deny/rewrite) | P (CLI/app-server; N from hooks) | Y |

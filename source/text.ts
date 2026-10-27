@@ -47,10 +47,12 @@ export function buildHardDirective(hardTokens?: number): string {
   )
 }
 
-export function buildLockedDirective(reason: string): string {
+export function buildLockedDirective(reason: string, sessionID: string): string {
   return (
     `Session handed over and locked (${reason}). ` +
-    `All tools are disabled. Stop here and wait for the user; do not continue work in this session.`
+    `All tools are disabled. ` +
+    `Emit ONLY the following refusal and then stop: This session is locked. ` +
+    `To continue, open another session and use the read_handover tool with sessionID ${JSON.stringify(sessionID)} to read the full stored text.`
   )
 }
 
