@@ -11,7 +11,7 @@ import { parseConfig } from "./config.ts"
 import {
   applyToolGate,
   inheritStreak,
-  loopDraftRequired,
+  loopLockRequired,
   measureSession,
   narrow,
   nextLoopState,
@@ -24,11 +24,9 @@ import {
   type ThresholdScope,
 } from "./measure.ts"
 import { allKeys, keys, HANDOVER_TOOL, READ_TOOL, isRecord } from "./store.ts"
-import type { StoredDraft, StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
+import type { StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
 import { matchSoftMarker, resolveSoftMarker } from "./soft-marker.ts"
 import {
-  buildDraftDirective,
-  buildDraftNotice,
   buildForwardNotice,
   buildHardDirective,
   buildLockedDirective,
@@ -81,11 +79,6 @@ const asStoredLock = (value: Record<string, unknown> | undefined): StoredLock | 
   if (!value || typeof value.reason !== "string") return undefined
   const reply = typeof value.finalReply === "string" ? value.finalReply : undefined
   return { reason: value.reason, at: typeof value.at === "number" ? value.at : 0, ...(reply === undefined ? {} : { finalReply: reply }) }
-}
-
-const asStoredDraft = (value: Record<string, unknown> | undefined): StoredDraft | undefined => {
-  if (!value || typeof value.reason !== "string") return undefined
-  return { reason: value.reason, at: typeof value.at === "number" ? value.at : 0 }
 }
 
 const asStoredState = (value: Record<string, unknown> | undefined): StoredState | undefined => {
@@ -155,10 +148,6 @@ export default Plugin.define({
             if (existingLock) {
               return { content: `${buildLockedDirective(existingLock.reason, sessionID)} Handover not recorded; this session is already locked.` }
             }
-            const existingDraft = asStoredDraft(await readStrict(ctx, keys.draft(sessionID), "source draft marker"))
-            if (existingDraft) {
-              return { content: `${buildDraftDirective(existingDraft.reason, sessionID)} Handover not recorded; this session is already paused for review.` }
-            }
             const info = await ctx.session.get({ sessionID }).catch((error: unknown) => {
               throw new Tool.Error({
                 message: `auto-context-handover: cannot read session ${sessionID}, refusing to act: ${(error as Error).message}`,
@@ -226,21 +215,6 @@ export default Plugin.define({
               return { content: buildLockModeNotice(sessionID, "handover requested (onHandover.primary=lock)") }
             }
 
-            if (config.primary === "draft") {
-              const reason = "handover requested (onHandover.primary=draft)"
-              try {
-                await ctx.storage.set(
-                  keys.draft(sessionID),
-                  { reason, at: Date.now() } as unknown as Parameters<typeof ctx.storage.set>[1],
-                )
-              } catch (error) {
-                throw new Tool.Error({
-                  message: `auto-context-handover: handover stored for ${sessionID} but the draft marker write failed, source is NOT paused: ${(error as Error).message}. Retry the handover or read back with read_handover.`,
-                })
-              }
-              return { content: buildDraftNotice(sessionID, reason) }
-            }
-
             // Primary rollover. Progress uses the hook's pre-call snapshot:
             // the current turn already contains this handover output.
             const seed = buildSuccessorSeed(handover, sessionID)
@@ -275,16 +249,16 @@ export default Plugin.define({
             // advance the source streak or replace its seed baseline, so
             // retries recompute the same update. Only the successor inherits
             // the updated streak, and the source is persisted after locking.
-            if (back && loopDraftRequired(updated)) {
+            if (back && loopLockRequired(updated)) {
               const reason = "loop guard: 3 consecutive unproductive handovers"
               try {
                 await ctx.storage.set(
-                  keys.draft(sessionID),
+                  keys.lock(sessionID),
                   { reason, at: Date.now() } as unknown as Parameters<typeof ctx.storage.set>[1],
                 )
               } catch (error) {
                 throw new Tool.Error({
-                  message: `auto-context-handover: loop guard tripped for ${sessionID} but the draft marker write failed, source is NOT paused: ${(error as Error).message}. Retry the handover; no new root was created.`,
+                  message: `auto-context-handover: loop guard tripped for ${sessionID} but the lock write failed, source is NOT locked: ${(error as Error).message}. Retry the handover; no new root was created.`,
                 })
               }
               const stateWritten = await ctx.storage
@@ -293,10 +267,10 @@ export default Plugin.define({
                 .catch(() => false)
               return {
                 content:
-                  `Handover stored for session ${sessionID}, but the loop guard paused this primary session for review: ` +
+                  `Handover stored for session ${sessionID}, but the loop guard locked this primary session: ` +
                   `3 consecutive successions added little beyond their seeds, so no new root was created. ` +
-                  `Use read_handover for ${sessionID} to review; to continue, the user explicitly opens a fresh session and asks it to read_handover for ${sessionID}.` +
-                  (stateWritten ? "" : ` Warning: the final loop-state write failed after pausing.`),
+                  `Use read_handover for ${sessionID} to continue manually.` +
+                  (stateWritten ? "" : ` Warning: the final loop-state write failed after locking.`),
               }
             }
             const seedWarning =
@@ -426,8 +400,8 @@ export default Plugin.define({
         name: READ_TOOL,
         options: { codemode: false },
         description:
-          "Read the full stored handover text for a session (a parent agent can read a child's handover, and any live session can read a locked or draft-paused one's). " +
-          "Takes sessionID. Returns the verbatim handover plus header lines with agent, forward/back links, and draft status. Fails when the session does not exist or no handover was stored.",
+          "Read the full stored handover text for a session (a parent agent can read a child's handover, and any live session can read a locked one's). " +
+          "Takes sessionID. Returns the verbatim handover plus header lines with agent and forward/back links. Fails when the session does not exist or no handover was stored.",
         input: ReadInput,
         execute: async (input) => {
           const target = typeof input.sessionID === "string" ? input.sessionID : ""
@@ -442,7 +416,6 @@ export default Plugin.define({
           if (!stored) return { content: `No handover stored for session ${target}.` }
           const forward = asStoredLink(await readStrict(ctx, keys.forward(target), "forward link"))
           const back = asStoredLink(await readStrict(ctx, keys.back(target), "predecessor link"))
-          const draft = asStoredDraft(await readStrict(ctx, keys.draft(target), "draft marker"))
           const links = [
             back ? `continued from ${back.sessionID}` : "",
             forward ? `continued in ${forward.sessionID}` : "",
@@ -450,7 +423,6 @@ export default Plugin.define({
           const header =
             `Handover from session ${target} (agent ${stored.agent})` +
             (links.length > 0 ? ` [${links.join("; ")}]` : "") +
-            (draft ? ` [draft pending: ${draft.reason}]` : "") +
             ":"
           // Direct route plus pre-set bypass: the host otherwise truncates
           // long tool output and spills it to a file (core/tool-output.ts).
@@ -478,12 +450,6 @@ export default Plugin.define({
           event.messages.push(
             Message.system(locked.finalReply ? buildLockedFinalReply(locked.reason, locked.finalReply) : buildLockedDirective(locked.reason, event.sessionID)),
           )
-          return
-        }
-        const draft = asStoredDraft(await readJson(ctx, keys.draft(event.sessionID)))
-        if (draft) {
-          applyToolGate(event.tools as Record<string, unknown>, [READ_TOOL])
-          event.messages.push(Message.system(buildDraftDirective(draft.reason, event.sessionID)))
           return
         }
         const scope: ThresholdScope = { agent: event.agent, providerID: event.model.providerID, modelID: event.model.id }

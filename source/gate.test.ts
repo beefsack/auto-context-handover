@@ -553,30 +553,6 @@ describe("auto-context-handover harness", () => {
     assert.deepEqual(Object.keys(later.tools), [])
   })
 
-  it("child handover under primary draft still returns with a stop lock and no draft marker", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_dchild", { id: "ses_dchild", parentID: "ses_parent", agent: "build", history: [] })
-    const event = contextEvent("ses_dchild", { bash: {}, context_handover: {} })
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    const full = "child full handover body under draft " + "z".repeat(100)
-    const result = await handover.execute(
-      { handover: full, summary: "child summary draft" },
-      { sessionID: "ses_dchild", agent: "build" },
-    )
-    assert.equal(fake.created.length, 0)
-    assert.equal(fake.prompted.length, 0)
-    assert.ok(fake.storage.get("auto-context-handover:lock:ses_dchild"))
-    assert.equal(fake.storage.get("auto-context-handover:draft:ses_dchild"), undefined)
-    assert.ok(!String(result.content).includes(full))
-    assert.match(String(result.content), /child summary draft/)
-    assert.match(String(result.content), /ses_dchild/)
-    assert.match(String(result.content), /read_handover/)
-    assert.match(String(result.content), /ends here/)
-  })
-
   it("reads back verbatim text with links from another session", async () => {
     const fake = makeFake({})
     await setup(fake)
@@ -647,7 +623,7 @@ describe("auto-context-handover harness", () => {
     assert.equal(state.unproductive, 0)
   })
 
-  it("pauses for review after the third consecutive unproductive handover without a new root", async () => {
+  it("locks after the third consecutive unproductive handover without a new root", async () => {
     const fake = makeFake({ soft: 1000 })
     await setup(fake)
     fake.sessions.set("ses_loop", {
@@ -663,9 +639,8 @@ describe("auto-context-handover harness", () => {
     assert.ok(handover)
     const result = await handover.execute({ handover: "x", summary: "s" }, { sessionID: "ses_loop", agent: "build" })
     assert.equal(fake.created.length, 0)
-    assert.equal(fake.storage.get("auto-context-handover:lock:ses_loop"), undefined)
-    assert.ok(fake.storage.get("auto-context-handover:draft:ses_loop"))
-    assert.match(String(result.content), /loop guard paused/)
+    assert.ok(fake.storage.get("auto-context-handover:lock:ses_loop"))
+    assert.match(String(result.content), /loop guard locked/)
     assert.match(String(result.content), /no new root was created/)
     assert.ok(fake.storage.get("auto-context-handover:link:back:ses_loop"))
     assert.equal(fake.storage.get("auto-context-handover:link:forward:ses_loop"), undefined)
@@ -923,7 +898,7 @@ describe("auto-context-handover harness", () => {
     }
   })
 
-  it("rotates root through three short successions, then loop-pauses for review", async () => {
+  it("rotates root through three short successions, then loop-locks", async () => {
     const fake = makeFake({ soft: 100000 })
     await setup(fake)
     const rootText = "root work " + "x".repeat(200)
@@ -939,10 +914,9 @@ describe("auto-context-handover harness", () => {
     assert.equal((fake.storage.get("auto-context-handover:state:ses_new_3") as { unproductive: number }).unproductive, 2)
     const t3 = "s3 work " + "x".repeat(200)
     const s3 = await driveHandover(fake, "ses_new_3", t3, seedOf(t2, "ses_new_2") + 50)
-    assert.match(String(s3.content), /loop guard paused/)
+    assert.match(String(s3.content), /loop guard locked/)
     assert.equal(fake.created.length, 3)
-    assert.equal(fake.storage.get("auto-context-handover:lock:ses_new_3"), undefined)
-    assert.ok(fake.storage.get("auto-context-handover:draft:ses_new_3"))
+    assert.ok(fake.storage.get("auto-context-handover:lock:ses_new_3"))
   })
 
   it("resets the streak on a productive handover and counts again", async () => {
@@ -961,10 +935,10 @@ describe("auto-context-handover harness", () => {
     await driveHandover(fake, "ses_new_3", q2, seedOf(q1, "ses_new_2") + 50)
     assert.equal((fake.storage.get("auto-context-handover:state:ses_new_4") as { unproductive: number }).unproductive, 2)
     const q3 = "q3 " + "x".repeat(200)
-    const paused = await driveHandover(fake, "ses_new_4", q3, seedOf(q2, "ses_new_3") + 50)
-    assert.match(String(paused.content), /loop guard paused/)
+    const locked = await driveHandover(fake, "ses_new_4", q3, seedOf(q2, "ses_new_3") + 50)
+    assert.match(String(locked.content), /loop guard locked/)
     assert.equal(fake.created.length, 4)
-    assert.ok(fake.storage.get("auto-context-handover:draft:ses_new_4"))
+    assert.ok(fake.storage.get("auto-context-handover:lock:ses_new_4"))
   })
 
   it("replays only the short final reply on later hooks for a locked child", async () => {
@@ -1164,132 +1138,12 @@ describe("auto-context-handover harness", () => {
     assert.match(String(retry.content), /ses_lm2/)
   })
 
-  it("draft primary stores without successor, lock, or links", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_draft", { id: "ses_draft", agent: "build", history: [] })
-    const event = contextEvent("ses_draft", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    const result = await handover.execute({ handover: "draft body", summary: "s" }, { sessionID: "ses_draft", agent: "build" })
-    assert.equal(fake.created.length, 0)
-    assert.equal(fake.prompted.length, 0)
-    assert.equal(fake.storage.get("auto-context-handover:lock:ses_draft"), undefined)
-    assert.equal(fake.storage.get("auto-context-handover:link:forward:ses_draft"), undefined)
-    assert.equal(fake.storage.get("auto-context-handover:link:back:ses_new_1"), undefined)
-    const marker = fake.storage.get("auto-context-handover:draft:ses_draft") as { reason: string; at: number }
-    assert.ok(marker)
-    assert.match(marker.reason, /draft/)
-    assert.equal(typeof marker.at, "number")
-    assert.deepEqual(Object.keys(marker).sort(), ["at", "reason"])
-    assert.match(String(result.content), /paused for review/)
-    assert.match(String(result.content), /No successor was created/)
-    assert.match(String(result.content), /NOT locked/)
-    assert.match(String(result.content), /explicitly opens a fresh session/)
-    assert.match(String(result.content), /read_handover/)
-    assert.ok(!/locked/.test(String(result.content).toLowerCase()) || /NOT locked/.test(String(result.content)))
+  it("rejects arbitrary unsupported primary values at setup", async () => {
+    const fake = makeFake({ onHandover: { primary: "archive" } })
+    await assert.rejects(setup(fake), /unsupported onHandover\.primary.*new-session.*lock/)
   })
 
-  it("draft review hook keeps only read_handover and stops work even above hard", async () => {
-    const fake = makeFake({ soft: 1000, hard: 1500, onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_drev", {
-      id: "ses_drev",
-      agent: "build",
-      history: [assistantMessage({ input: 1200, output: 300, reasoning: 100, cache: { read: 0, write: 0 } })],
-    })
-    const event = contextEvent("ses_drev", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    await handover.execute({ handover: "body", summary: "s" }, { sessionID: "ses_drev", agent: "build" })
-    fake.sessions.set("ses_drev", {
-      id: "ses_drev",
-      agent: "build",
-      history: [assistantMessage({ input: 2000, output: 500, reasoning: 0, cache: { read: 0, write: 0 } })],
-    })
-    const later = contextEvent("ses_drev", outgoingTools(fake, { bash: {}, read: {}, execute: {} }))
-    await fake.hooks.get("context")?.(later as unknown as Record<string, unknown>)
-    assert.deepEqual(Object.keys(later.tools), ["read_handover"])
-    const text = later.messages.map((message) => JSON.stringify(message)).join("\n")
-    assert.match(text, /paused for review/)
-    assert.match(text, /Stop the task/)
-    assert.match(text, /read_handover/)
-    assert.match(text, /ses_drev/)
-    assert.ok(!/Only the context_handover tool remains/.test(text), "no redundant hard nudge")
-    assert.ok(!/Auto-context-handover (notice|warning|final warning)/.test(text))
-  })
-
-  it("pending draft rejects rewrites, including direct calls without a new hook", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_ddup", { id: "ses_ddup", agent: "build", history: [] })
-    const event = contextEvent("ses_ddup", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    await handover.execute({ handover: "original", summary: "s" }, { sessionID: "ses_ddup", agent: "build" })
-    const retry = await handover.execute({ handover: "overwrite", summary: "x" }, { sessionID: "ses_ddup", agent: "build" })
-    assert.match(String(retry.content), /already paused for review/)
-    assert.match(String(retry.content), /Handover not recorded/)
-    assert.equal((fake.storage.get("auto-context-handover:handover:ses_ddup") as { text: string }).text, "original")
-    assert.equal(fake.created.length, 0)
-    // Direct call path: new setup instance shares stored marker via same storage map.
-    const fake2 = makeFake({})
-    fake2.storage.set("auto-context-handover:draft:ses_ddup", fake.storage.get("auto-context-handover:draft:ses_ddup"))
-    fake2.storage.set("auto-context-handover:handover:ses_ddup", fake.storage.get("auto-context-handover:handover:ses_ddup"))
-    fake2.sessions.set("ses_ddup", { id: "ses_ddup", agent: "build", history: [] })
-    await setup(fake2)
-    const handover2 = fake2.tools.get("context_handover")
-    assert.ok(handover2)
-    // No hook run for fake2: pending draft must still refuse before identity checks.
-    const direct = await handover2.execute({ handover: "overwrite2", summary: "x" }, { sessionID: "ses_ddup", agent: "build" })
-    assert.match(String(direct.content), /already paused for review/)
-    assert.equal((fake2.storage.get("auto-context-handover:handover:ses_ddup") as { text: string }).text, "original")
-  })
-
-  it("draft marker survives a setup reload from stored KV", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_reload", { id: "ses_reload", agent: "build", history: [] })
-    const event = contextEvent("ses_reload", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    await handover.execute({ handover: "reload body", summary: "s" }, { sessionID: "ses_reload", agent: "build" })
-    // Simulate restart: fresh setup closure over the same stored KV map.
-    const storedKeys = new Map(fake.storage)
-    const fakeR = makeFake({})
-    for (const [k, v] of storedKeys) fakeR.storage.set(k, v)
-    fakeR.sessions.set("ses_reload", { id: "ses_reload", agent: "build", history: [] })
-    await setup(fakeR)
-    const later = contextEvent("ses_reload", { bash: {}, context_handover: {}, read_handover: {} })
-    await fakeR.hooks.get("context")?.(later as unknown as Record<string, unknown>)
-    assert.deepEqual(Object.keys(later.tools), ["read_handover"])
-    const text = later.messages.map((message) => JSON.stringify(message)).join("\n")
-    assert.match(text, /paused for review/)
-  })
-
-  it("draft marker write failure keeps text but reports NOT paused", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_dfail", { id: "ses_dfail", agent: "build", history: [] })
-    fake.failSetKeys.add("auto-context-handover:draft:ses_dfail")
-    const event = contextEvent("ses_dfail", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    await assert.rejects(
-      handover.execute({ handover: "kept", summary: "s" }, { sessionID: "ses_dfail", agent: "build" }),
-      /draft marker write failed.*NOT paused/,
-    )
-    assert.equal((fake.storage.get("auto-context-handover:handover:ses_dfail") as { text: string }).text, "kept")
-    assert.equal(fake.storage.get("auto-context-handover:draft:ses_dfail"), undefined)
-    assert.equal(fake.created.length, 0)
-  })
-
-  it("loop-guard draft marker failure reports NOT paused with no new root", async () => {
+  it("loop-guard lock failure reports NOT locked with no new root", async () => {
     const fake = makeFake({ soft: 1000 })
     await setup(fake)
     fake.sessions.set("ses_lfail", {
@@ -1299,20 +1153,20 @@ describe("auto-context-handover harness", () => {
     })
     fake.storage.set("auto-context-handover:link:back:ses_lfail", { sessionID: "ses_parent", at: 1 })
     fake.storage.set("auto-context-handover:state:ses_lfail", { chain: 2, unproductive: 2, seedEstimate: 1100, highWater: 1200 })
-    fake.failSetKeys.add("auto-context-handover:draft:ses_lfail")
+    fake.failSetKeys.add("auto-context-handover:lock:ses_lfail")
     const event = contextEvent("ses_lfail", {})
     await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
     const handover = fake.tools.get("context_handover")
     assert.ok(handover)
     await assert.rejects(
       handover.execute({ handover: "x", summary: "s" }, { sessionID: "ses_lfail", agent: "build" }),
-      /loop guard tripped.*draft marker write failed.*NOT paused/,
+      /loop guard tripped.*lock write failed.*NOT locked/,
     )
     assert.equal(fake.created.length, 0)
     assert.equal(fake.storage.get("auto-context-handover:lock:ses_lfail"), undefined)
   })
 
-  it("loop-guard draft pause warns when the final state write fails", async () => {
+  it("loop-guard lock warns when the final state write fails", async () => {
     const fake = makeFake({ soft: 1000 })
     await setup(fake)
     fake.sessions.set("ses_lwarn", {
@@ -1328,59 +1182,8 @@ describe("auto-context-handover harness", () => {
     const handover = fake.tools.get("context_handover")
     assert.ok(handover)
     const result = await handover.execute({ handover: "x", summary: "s" }, { sessionID: "ses_lwarn", agent: "build" })
-    assert.match(String(result.content), /loop guard paused/)
-    assert.match(String(result.content), /final loop-state write failed after pausing/)
-    assert.ok(fake.storage.get("auto-context-handover:draft:ses_lwarn"))
-  })
-
-  it("read_handover shows draft status with truncation bypass intact", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_dread", { id: "ses_dread", agent: "build", history: [] })
-    fake.sessions.set("ses_reader", { id: "ses_reader", agent: "build", history: [] })
-    const event = contextEvent("ses_dread", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    const read = fake.tools.get("read_handover")
-    assert.ok(handover && read)
-    await handover.execute({ handover: "draft verbatim", summary: "s" }, { sessionID: "ses_dread", agent: "build" })
-    const result = (await read.execute({ sessionID: "ses_dread" }, { sessionID: "ses_reader", agent: "build" })) as {
-      content: unknown
-      metadata: unknown
-    }
-    assert.match(String(result.content), /draft verbatim/)
-    assert.match(String(result.content), /draft pending/)
-    assert.equal((result.metadata as { truncated?: boolean }).truncated, false)
-  })
-
-  it("read_handover refuses on draft storage outage", async () => {
-    const fake = makeFake({ onHandover: { primary: "draft" } })
-    await setup(fake)
-    fake.sessions.set("ses_dout", { id: "ses_dout", agent: "build", history: [] })
-    fake.sessions.set("ses_other", { id: "ses_other", agent: "build", history: [] })
-    const event = contextEvent("ses_dout", {})
-    await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
-    const handover = fake.tools.get("context_handover")
-    assert.ok(handover)
-    await handover.execute({ handover: "body", summary: "s" }, { sessionID: "ses_dout", agent: "build" })
-    fake.failGetKeys.add("auto-context-handover:draft:ses_dout")
-    const read = fake.tools.get("read_handover")
-    assert.ok(read)
-    await assert.rejects(
-      read.execute({ sessionID: "ses_dout" }, { sessionID: "ses_other", agent: "build" }),
-      /storage unavailable.*draft marker/,
-    )
-  })
-
-  it("cleans draft markers on session.deleted", async () => {
-    const fake = makeFake({}, [{ type: "session.deleted", data: { sessionID: "ses_gone" } }])
-    fake.storage.set("auto-context-handover:handover:ses_gone", { text: "t" })
-    fake.storage.set("auto-context-handover:draft:ses_gone", { reason: "r", at: 1 })
-    fake.storage.set("auto-context-handover:lock:ses_gone", { reason: "r" })
-    await setup(fake)
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal(fake.storage.get("auto-context-handover:handover:ses_gone"), undefined)
-    assert.equal(fake.storage.get("auto-context-handover:draft:ses_gone"), undefined)
-    assert.equal(fake.storage.get("auto-context-handover:lock:ses_gone"), undefined)
+    assert.match(String(result.content), /loop guard locked/)
+    assert.match(String(result.content), /final loop-state write failed after locking/)
+    assert.ok(fake.storage.get("auto-context-handover:lock:ses_lwarn"))
   })
 })

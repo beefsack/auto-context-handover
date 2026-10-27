@@ -257,8 +257,8 @@ export function inheritStreak(parent: LoopState, seedEstimate: number): LoopStat
   return { chain: parent.chain, unproductive: parent.unproductive, seedEstimate, highWater: 0 }
 }
 
-/** Pause the primary for draft review after 3 consecutive unproductive successions. */
-export function loopDraftRequired(state: LoopState): boolean {
+/** Lock the primary after 3 consecutive unproductive successions. */
+export function loopLockRequired(state: LoopState): boolean {
   return state.unproductive >= 3
 }
 

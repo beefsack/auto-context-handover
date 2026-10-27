@@ -27,11 +27,12 @@ describe("parseConfig", () => {
     assert.throws(() => parseConfig({ onHandover: "new-session" }), /nested/)
     assert.throws(() => parseConfig({ onHandover: "lock" }), /nested/)
     assert.throws(() => parseConfig({ onHandover: { primary: "reset" } }), /unsupported onHandover\.primary/)
+    assert.throws(() => parseConfig({ onHandover: { primary: "archive" } }), /unsupported onHandover\.primary.*new-session.*lock/)
     assert.throws(() => parseConfig({ onHandover: { subagent: "reset" } }), /unsupported onHandover\.subagent/)
-    assert.throws(() => parseConfig({ onHandover: { subagent: "draft" } }), /unsupported onHandover\.subagent/)
+    assert.throws(() => parseConfig({ onHandover: { subagent: "quarantine" } }), /unsupported onHandover\.subagent/)
   })
-  it("accepts primary draft while keeping reset and child draft rejected", () => {
-    assert.equal(parseConfig({ onHandover: { primary: "draft" } }).primary, "draft")
+  it("accepts lock and new-session primaries while keeping reset rejected", () => {
+    assert.equal(parseConfig({ onHandover: { primary: "lock" } }).primary, "lock")
     assert.equal(parseConfig({ onHandover: { primary: "new-session" } }).primary, "new-session")
   })
   it("requires stages to start at 0 and ascend", () => {

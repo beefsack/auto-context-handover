@@ -8,7 +8,7 @@ export interface HandoverConfig {
   readonly modelOverrides: Record<string, unknown>
   readonly agentOverrides: Record<string, unknown>
   readonly stages: readonly [number, number, number]
-  readonly primary: "new-session" | "lock" | "draft"
+  readonly primary: "new-session" | "lock"
   readonly subagent: "return"
   readonly handoverDescription: string | undefined
 }
@@ -63,11 +63,11 @@ export function parseConfig(options: unknown): HandoverConfig {
   }
   const action = input.onHandover ?? {}
   if (!isRecord(action)) {
-    throw new Error('auto-context-handover: unsupported "onHandover"; use nested { "primary": "new-session" | "lock" | "draft", "subagent": "return" }')
+    throw new Error('auto-context-handover: unsupported "onHandover"; use nested { "primary": "new-session" | "lock", "subagent": "return" }')
   }
   const primary = action.primary ?? "new-session"
-  if (primary !== "new-session" && primary !== "lock" && primary !== "draft") {
-    throw new Error(`auto-context-handover: unsupported onHandover.primary ${JSON.stringify(primary)}; use "new-session", "lock", or "draft"`)
+  if (primary !== "new-session" && primary !== "lock") {
+    throw new Error(`auto-context-handover: unsupported onHandover.primary ${JSON.stringify(primary)}; use "new-session" or "lock"`)
   }
   const subagent = action.subagent ?? "return"
   if (subagent !== "return") {
