@@ -24,6 +24,7 @@ import {
   type ThresholdScope,
 } from "./measure.ts"
 import { allKeys, keys, HANDOVER_TOOL, READ_TOOL, isRecord } from "./store.ts"
+import { ROLLOVER_METADATA_KEY } from "./tui-follow.ts"
 import type { StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
 import { matchSoftMarker, resolveSoftMarker } from "./soft-marker.ts"
 import {
@@ -390,6 +391,8 @@ export default Plugin.define({
                 (sourceStateWritten ? "" : ` Warning: the source loop-state write failed after locking; the successor already carries the correct streak.`) +
                 (forwardWritten ? "" : ` Warning: the visible forward link on ${sessionID} could not be written; the link is stored with read_handover metadata.`) +
                 ` Continue in ${createdID}.`,
+              // The tool-success event already identifies the source session.
+              metadata: { [ROLLOVER_METADATA_KEY]: { successorID: createdID } },
             }
           } finally {
             inflight.delete(sessionID)

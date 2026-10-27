@@ -1186,4 +1186,63 @@ describe("auto-context-handover harness", () => {
     assert.match(String(result.content), /final loop-state write failed after locking/)
     assert.ok(fake.storage.get("auto-context-handover:lock:ses_lwarn"))
   })
+
+  it("emits namespaced rollover metadata only on successful new-session rollover", async () => {
+    const fake = makeFake({})
+    await setup(fake)
+    const result = await driveHandover(fake, "ses_meta", "work done " + "x".repeat(200), 50)
+    assert.match(String(result.content), /Handover complete/)
+    assert.match(String(result.content), /Continue in ses_new_1/)
+    assert.deepEqual(result.metadata, { "auto-context-handover": { successorID: "ses_new_1" } })
+  })
+
+  it("omits rollover metadata for child, lock-mode, loop-guard, and failed handovers", async () => {
+    const childFake = makeFake({})
+    await setup(childFake)
+    childFake.sessions.set("ses_kidm", { id: "ses_kidm", parentID: "ses_parent", agent: "build", history: [] })
+    const childEvent = contextEvent("ses_kidm", {})
+    await childFake.hooks.get("context")?.(childEvent as unknown as Record<string, unknown>)
+    const childTool = childFake.tools.get("context_handover")
+    assert.ok(childTool)
+    const childResult = await childTool.execute({ handover: "body", summary: "s" }, { sessionID: "ses_kidm", agent: "build" })
+    assert.equal(childResult.metadata, undefined)
+
+    const lockFake = makeFake({ onHandover: { primary: "lock" } })
+    await setup(lockFake)
+    lockFake.sessions.set("ses_lmm", { id: "ses_lmm", agent: "build", history: [] })
+    const lockEvent = contextEvent("ses_lmm", {})
+    await lockFake.hooks.get("context")?.(lockEvent as unknown as Record<string, unknown>)
+    const lockTool = lockFake.tools.get("context_handover")
+    assert.ok(lockTool)
+    const lockResult = await lockTool.execute({ handover: "body", summary: "s" }, { sessionID: "ses_lmm", agent: "build" })
+    assert.match(String(lockResult.content), /[Nn]o successor/)
+    assert.equal(lockResult.metadata, undefined)
+
+    const loopFake = makeFake({ soft: 1000 })
+    await setup(loopFake)
+    loopFake.sessions.set("ses_loopm", {
+      id: "ses_loopm",
+      agent: "build",
+      history: [assistantMessage({ input: 1100, output: 100, reasoning: 0, cache: { read: 0, write: 0 } })],
+    })
+    loopFake.storage.set("auto-context-handover:link:back:ses_loopm", { sessionID: "ses_parent", at: 1 })
+    loopFake.storage.set("auto-context-handover:state:ses_loopm", { chain: 2, unproductive: 2, seedEstimate: 1100, highWater: 1200 })
+    const loopEvent = contextEvent("ses_loopm", {})
+    await loopFake.hooks.get("context")?.(loopEvent as unknown as Record<string, unknown>)
+    const loopTool = loopFake.tools.get("context_handover")
+    assert.ok(loopTool)
+    const loopResult = await loopTool.execute({ handover: "x", summary: "s" }, { sessionID: "ses_loopm", agent: "build" })
+    assert.match(String(loopResult.content), /loop guard locked/)
+    assert.equal(loopResult.metadata, undefined)
+
+    const failFake = makeFake({})
+    await setup(failFake)
+    failFake.createBehavior = () => {
+      throw new Error("boom")
+    }
+    await assert.rejects(
+      driveHandover(failFake, "ses_failm", "work " + "x".repeat(200), 50),
+      /successor creation failed/,
+    )
+  })
 })

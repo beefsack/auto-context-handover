@@ -7,9 +7,9 @@ The session's own model writes the handover; a linked fresh session continues it
 The plugin only measures, warns, hard-gates, and rotates.
 `compaction.auto` stays on and untouched. Activation
 is runtime only: the plugin registers hooks and tools on host load, no model
-calls. There is no TUI companion (deferred): the successor starts without
-switching your visible session; its ID is in the tool result and in the old
-session's forward link.
+calls. The bundled TUI companion follows successful root rollovers when you
+are still viewing the old session. It never switches you away from another
+session or shows review/confirmation UI. Desktop and web do not auto-follow.
 
 ## Install (local directory)
 
@@ -27,6 +27,8 @@ session's forward link.
 Run `npm install` once in this directory (runtime deps for the plugin host).
 No build step: the host resolves the root `index.ts` shim and loads `source/`
 directly. Node >= 22.18 is required for the `.ts` tests.
+The root `tui.ts` companion loads automatically from the same `plugins` entry;
+no separate install, `cli.json` entry, or additional option is required.
 Local source changes are watched for automatic plugin reload. Keep related
 edits coherent: a failed import can leave the previous generation active.
 In one live check, a stale missing-export failure persisted across saves until
@@ -104,7 +106,8 @@ calls before completion.
 - Primary rollover creates a ROOT with the active agent/model and original
   directory. Readiness, links, and source lock precede successor prompting.
   The seed carries the full handover and backlink; the old session records
-  `continued in session <id>`. The TUI does not follow automatically.
+  `continued in session <id>`. The TUI follows only if it is still showing the
+  source when the successful rollover arrives and after successor lookup.
 - Lock mode creates no successor. Children always return to their parent:
   only the short summary, child session ID, and `read_handover` hint. Their
   stop-lock repeats that short final reply on subsequent requests.
@@ -177,6 +180,13 @@ injected directives; a model's description of its tools alone is not proof.
    the handover seed plus backlink and `read_handover` hint; `read_handover`
    for the source from any live session shows the verbatim text with
    `continued in <successor>`.
+
+   TUI follow check: keep the source visible during rollover. Expect the TUI
+   to switch to the successor without any prompt. Repeat, but navigate to
+   another session before the source completes its handover; expect to stay
+   there. Lock mode and child return must not switch sessions. Companion setup
+   was verified in an isolated OpenCode 2.1.4 TUI without a model call; actual
+   rollover navigation still needs this interactive check.
 
 2. Lock mode.
    Do: set `onHandover: { "primary": "lock" }`, cross soft, call
@@ -258,8 +268,11 @@ injected directives; a model's description of its tools alone is not proof.
 - The source lock persists: after an uncertain prompt admission the source
   stays locked and refuses handover retries, so recovery is manual (the user
   opens the successor and pastes via `read_handover`).
-- No TUI companion: successors start unattended but never switch your view.
-  Its deferred scope is follow-rollover only, with no review or interactive UI.
+- TUI following uses live successful-rollover events only. Missed events
+  (for example, while disconnected or before companion activation), failed
+  successor lookups, and uncertain prompt admission do not redirect. Opening
+  an old session later does not redirect either; use its forward link manually.
+- Desktop and web do not auto-follow; there is no interactive review UI.
 - No reset or interactive review action: unsupported values are explicit setup
   errors. Storage failures in the context hook still fail open for locks and
   measurement.
