@@ -2,7 +2,7 @@
 
 Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 
-The session's own model writes the handover; a linked fresh session continues it, and subagents return only a summary to the parent.
+The session's own model writes the handover; a linked fresh session continues it automatically, or draft mode waits for user review. Subagents return only a summary to the parent.
 
 The plugin only measures, warns, hard-gates, and rotates.
 `compaction.auto` stays on and untouched. Activation
@@ -37,7 +37,7 @@ directly. Node >= 22.18 is required for the `.ts` tests.
 | `modelOverrides` | `{}` | e.g. `{"anthropic/claude-opus-4-6": "60%", "gpt-5": 90000}`; validated independently. |
 | `agentOverrides` | `{}` | e.g. `{"build": "80%"}` (highest precedence); validated independently. |
 | `stages` | `[0, 0.1, 0.2]` | Nudge boundaries relative to soft: warn at soft, then soft*(1+offset). Must be 3 ascending offsets starting at 0; stage texts are fixed. |
-| `onHandover.primary` | `"new-session"` | `"new-session"` or `"lock"`. Anything else (including the old flat string or `draft`/`reset`) is a setup error. |
+| `onHandover.primary` | `"new-session"` | `"new-session"` starts a linked successor; `"lock"` stops with no tools; `"draft"` stores the handover without a successor and pauses for review with only `read_handover`. Other values (including `reset` or the old flat string) are setup errors. |
 | `onHandover.subagent` | `"return"` | Only `"return"` is supported. Anything else is a setup error. |
 | `handoverDescription` | built-in | Overrides the `context_handover` tool description template wholesale. |
 
@@ -79,9 +79,18 @@ no gate). All-zero provider usage counts as unknown, never as an anchor.
 - Lock mode creates no successor. Children always return to their parent:
   only the short summary, child session ID, and `read_handover` hint. Their
   stop-lock repeats that short final reply on subsequent requests.
+- Draft mode creates no successor and does not lock the source. It persists a
+  review-only pause: only `read_handover` remains, even above `hard`; the model
+  may inspect and discuss the stored text but must not resume the task there.
+  Ask it to read the handover using the source session ID. After reviewing,
+  open a fresh session and explicitly ask it to `read_handover` for that ID
+  and continue. This manual continuation does not add links or copy the old
+  model/agent selection. Pending drafts cannot be overwritten by another
+  handover call and remain review-only after reload or config changes.
 - EXPERIMENTAL loop guard: three consecutive successors adding <25% of soft
-  beyond their seed lock instead of rotating. Productive handovers reset the
-  streak; the first root handover never counts. Seed >50% of soft only warns.
+  beyond their seed pause as a draft instead of rotating. Productive handovers
+  reset the streak; the first root handover never counts. Seed >50% of soft
+  only warns.
 
 ## Storage
 
@@ -91,8 +100,8 @@ The host persists complete tool-call inputs (`packages/schema/src/session-messag
 plugins expose no full-history API and `ctx.session.context` is filtered
 (`packages/core/src/session/history.ts:149-179`), so the full text cannot be recovered from the
 transcript later. The handover body is therefore stored under
-`auto-context-handover:handover:<sessionID>` (lock, loop state, and forward/back
-links beside it) and removed with the session on `session.deleted`.
+`auto-context-handover:handover:<sessionID>` (lock, draft pause, loop state,
+and forward/back links beside it) and removed with the session on `session.deleted`.
 `read_handover` is a direct (`codemode: false`) tool returning the full
 text with `metadata: { truncated: false }`, which bypasses the host's
 tool-output truncation instead of spilling to a file. It returns only the
@@ -114,12 +123,16 @@ Never hardcode or pick a model in test files, scripts, or configs. If the
 chosen model is rejected, stop rather than substitute another model.
 Give sessions explicit titles so automatic title generation cannot select
 a different model for an auxiliary request.
+Check a context observer's `event.model` against the requested model before
+accepting evidence. Use a private server (`--standalone`) and an explicit
+agent with access to the plugin tools so inherited settings do not obscure
+the check.
 
 For headless checks, require the chosen model in the invoking environment:
 
 ```sh
 : "${LIVE_TEST_MODEL:?Set the model explicitly chosen for this run}"
-opencode run --model "$LIVE_TEST_MODEL" --title "Handover check" --format json "What is 1234 + 5678? Reply exactly SUM-6912. Do not call any tools."
+opencode run --standalone --agent build --model "$LIVE_TEST_MODEL" --title "Handover check" --format json "What is 1234 + 5678? Reply exactly SUM-6912. Do not call any tools."
 : "${SESSION_ID:?Set sessionID from the run's JSON events}"
 opencode session export "$SESSION_ID" > session.json
 ```
@@ -150,29 +163,44 @@ injected directives; a model's description of its tools alone is not proof.
    Later work requests should refuse and direct the user to read that
    stored text from another session.
 
-3. Child return and parent read.
+3. Draft review and explicit continuation.
+   Do: set `onHandover: { "primary": "draft" }`, explicitly request a
+   handover, then ask the same session to read the stored text and do a
+   separate small task.
+   Expect: verbatim text is stored; no successor or lock is created. The
+   observer sees only `read_handover`; the model can quote/discuss the text
+   but declines the separate task and points at fresh-session continuation.
+   Repeat above `hard` and after reload: review remains available, without a
+   hard-limit handover directive. Repeated handover calls cannot replace it.
+   Then explicitly open a fresh session, ask it to read that ID and complete
+   a tiny continuation. Use a larger soft threshold for this check: reading
+   the full handover can otherwise immediately trigger another handover.
+   Expect: the fresh session reads and continues, with no automatic links.
+
+4. Child return and parent read.
    Do: from a parent session, launch a subagent that crosses soft and calls
    `context_handover` with a short summary.
    Expect: the child returns only the short summary plus its session ID and
    a `read_handover` hint (never the full text); the child locks; the parent
    reads the full text via `read_handover` with the child session ID.
 
-4. Hard gate.
+5. Hard gate.
    Do: set `hard` just above `soft`, push usage past it, and ask the agent
    which tools remain before it hands over.
    Expect: every tool except `context_handover` is removed for that request
    and a firm hard-limit directive is shown; calling `context_handover`
    still succeeds.
 
-5. Loop guard: root plus three short successions, then productive reset.
+6. Loop guard: root plus three short successions, then productive reset.
    Do: with `soft` 100000, do a short exchange and then `context_handover`
    to rotate root -> s1 -> s2 -> s3, each successor adding only a sentence
    or two beyond its seed; then in a fresh chain, do enough work to add
    >=25% of soft beyond the seed, followed by short handovers. The short
    exchange before each handover matters: without a measured pre-call
    snapshot the guard skips counting rather than guessing.
-   Expect: s3 locks with "loop guard" and no new root; the productive chain
-   resets the streak, then counts up and locks on the third short one.
+   Expect: s3 pauses as a draft with "loop guard" and no new root; only
+   `read_handover` remains for review, not an empty locked tool set. The
+   productive chain resets the streak, then drafts on the third short one.
    Counts are approximate, so do not expect exact manual outcomes.
    Keep transcripts short even with a larger soft threshold: fixed
    system/tool overhead counts as added tokens, so tiny thresholds can
@@ -181,7 +209,7 @@ injected directives; a model's description of its tools alone is not proof.
    Separately, with `soft` 1000, a handover body over 2000 characters
    ensures the full seed exceeds 50% of soft; expect a warning, not a block.
 
-6. Forward/back links and read after compaction.
+7. Forward/back links and read after compaction.
    Do: complete one rotation, then keep working in the successor until
    compaction runs, then call `read_handover` for the source session.
    Expect: the source header shows `continued in <successor>` and the
@@ -190,12 +218,12 @@ injected directives; a model's description of its tools alone is not proof.
    link lives in the successor's seed prompt, and `read_handover` for the
    successor reports no handover stored.
 
-7. Deletion cleanup.
+8. Deletion cleanup.
    Do: remove a handed-over session (`session.remove`), then call
    `read_handover` for it.
    Expect: the read reports the session does not exist. KV cleanup
-   (handover, lock, loop state, both links) is covered in the harness, not
-   inspectable via the read tool.
+   (handover, lock, draft pause, loop state, both links) is covered in the
+   harness, not inspectable via the read tool.
 
 ## Limitations
 
@@ -213,11 +241,18 @@ injected directives; a model's description of its tools alone is not proof.
   stays locked and refuses handover retries, so recovery is manual (the user
   opens the successor and pastes via `read_handover`).
 - No TUI companion: successors start unattended but never switch your view.
-- No reset/draft actions: unsupported values are explicit setup errors.
+- No reset action: unsupported values are explicit setup errors. Draft review
+  uses existing model tools, not an editable dialog or one-click continuation;
+  starting the fresh session is manual. Review-only guidance is model-facing,
+  not deterministic response interception. Storage failures in the context
+  hook still fail open, as they do for locks and measurement.
 - Compaction can drop the visible estimate; the hook keeps a high-water mark
   so pre-compaction progress still counts at handover.
 - Isolated OpenCode 2.1.4 live checks confirm lock mode, hard tool removal
   with a callable handover, linked rollover, default-variant preservation,
-  the seed-size warning, and locking on the third unproductive successor.
+  the seed-size warning, and drafting on the third unproductive successor.
+  Draft checks also confirm source readback, refusal to resume work there,
+  and explicit fresh-session continuation. Review above `hard`, draft
+  persistence after reload, and deletion cleanup are unit-tested, not live-tested.
   Nondefault variants, productive loop-streak reset, and readback after
   compaction were not exercised in these live runs.

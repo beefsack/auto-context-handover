@@ -26,9 +26,13 @@ describe("parseConfig", () => {
   it("rejects flat onHandover and unsupported actions with setup errors", () => {
     assert.throws(() => parseConfig({ onHandover: "new-session" }), /nested/)
     assert.throws(() => parseConfig({ onHandover: "lock" }), /nested/)
-    assert.throws(() => parseConfig({ onHandover: { primary: "draft" } }), /unsupported onHandover\.primary/)
     assert.throws(() => parseConfig({ onHandover: { primary: "reset" } }), /unsupported onHandover\.primary/)
     assert.throws(() => parseConfig({ onHandover: { subagent: "reset" } }), /unsupported onHandover\.subagent/)
+    assert.throws(() => parseConfig({ onHandover: { subagent: "draft" } }), /unsupported onHandover\.subagent/)
+  })
+  it("accepts primary draft while keeping reset and child draft rejected", () => {
+    assert.equal(parseConfig({ onHandover: { primary: "draft" } }).primary, "draft")
+    assert.equal(parseConfig({ onHandover: { primary: "new-session" } }).primary, "new-session")
   })
   it("requires stages to start at 0 and ascend", () => {
     assert.throws(() => parseConfig({ stages: [0.1, 0.2, 0.3] }), /"stages"/)

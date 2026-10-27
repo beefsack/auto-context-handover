@@ -10,6 +10,7 @@ const PREFIX = "auto-context-handover"
 export const keys = {
   handover: (sessionID: string) => `${PREFIX}:handover:${sessionID}`,
   lock: (sessionID: string) => `${PREFIX}:lock:${sessionID}`,
+  draft: (sessionID: string) => `${PREFIX}:draft:${sessionID}`,
   state: (sessionID: string) => `${PREFIX}:state:${sessionID}`,
   forward: (sessionID: string) => `${PREFIX}:link:forward:${sessionID}`,
   back: (sessionID: string) => `${PREFIX}:link:back:${sessionID}`,
@@ -18,6 +19,7 @@ export const keys = {
 export const allKeys = (sessionID: string): string[] => [
   keys.handover(sessionID),
   keys.lock(sessionID),
+  keys.draft(sessionID),
   keys.state(sessionID),
   keys.forward(sessionID),
   keys.back(sessionID),
@@ -36,6 +38,11 @@ export interface StoredLock {
   readonly at: number
   /** Short parent-facing reply stored at lock time; replayed verbatim by the locked hook. Never the full handover. */
   readonly finalReply?: string
+}
+
+export interface StoredDraft {
+  readonly reason: string
+  readonly at: number
 }
 
 export interface StoredState {

@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import {
   applyToolGate,
   inheritStreak,
-  loopLockRequired,
+  loopDraftRequired,
   measureSession,
   narrow,
   nextLoopState,
@@ -191,16 +191,16 @@ describe("loop guard", () => {
   it("does not count the root first handover", () => {
     const state = nextLoopState(undefined, { addedTokens: 0, softTokens: 100000, isRoot: true, seedEstimate: 1000, highWater: 0 })
     assert.deepEqual(state, { chain: 0, unproductive: 0, seedEstimate: 1000, highWater: 0 })
-    assert.equal(loopLockRequired(state), false)
+    assert.equal(loopDraftRequired(state), false)
   })
-  it("locks after 3 consecutive unproductive successions", () => {
+  it("pauses for draft review after 3 consecutive unproductive successions", () => {
     let state = nextLoopState(undefined, { addedTokens: 0, softTokens: 100000, isRoot: true, seedEstimate: 1000, highWater: 0 })
     for (let i = 0; i < 2; i++) {
       state = nextLoopState(state, { addedTokens: 1000, softTokens: 100000, isRoot: false, seedEstimate: 1000, highWater: 2000 })
-      assert.equal(loopLockRequired(state), false)
+      assert.equal(loopDraftRequired(state), false)
     }
     state = nextLoopState(state, { addedTokens: 1000, softTokens: 100000, isRoot: false, seedEstimate: 1000, highWater: 2000 })
-    assert.equal(loopLockRequired(state), true)
+    assert.equal(loopDraftRequired(state), true)
     assert.equal(state.chain, 3)
   })
   it("resets on productive successions (25% of soft beyond seed)", () => {
