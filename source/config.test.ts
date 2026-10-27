@@ -6,7 +6,7 @@ import { parseConfig } from "./config.ts"
 describe("parseConfig", () => {
   it("applies nested defaults", () => {
     const config = parseConfig({})
-    assert.equal(config.soft, "70%")
+    assert.equal(config.soft, 150000)
     assert.equal(config.hard, undefined)
     assert.equal(config.primary, "new-session")
     assert.equal(config.subagent, "return")

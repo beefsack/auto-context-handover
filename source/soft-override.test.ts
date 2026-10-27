@@ -429,4 +429,27 @@ describe("soft override precedence and lifecycle", () => {
     assert.equal(fake.storage.get("auto-context-handover:soft-override:ses_gone"), undefined)
     assert.equal(fake.storage.get("auto-context-handover:handover:ses_gone"), undefined)
   })
+
+  it("caps a stored integer child override at 70% of the window", async () => {
+    const fake = makeFake({})
+    await setup(fake)
+    // Window is 200000, so soft=190000 caps at 140000.
+    fake.storage.set("auto-context-handover:soft-override:ses_cap", { value: 190000, at: 1 })
+    fake.sessions.set("ses_cap", {
+      id: "ses_cap",
+      parentID: "ses_parent",
+      history: [assistantMessage({ input: 130000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+    })
+    const quiet = contextEvent("ses_cap", {})
+    await fake.hooks.get("context")?.(quiet as unknown as Record<string, unknown>)
+    assert.equal(quiet.messages.length, 0)
+    fake.sessions.set("ses_cap", {
+      id: "ses_cap",
+      parentID: "ses_parent",
+      history: [assistantMessage({ input: 145000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+    })
+    const nudged = contextEvent("ses_cap", {})
+    await fake.hooks.get("context")?.(nudged as unknown as Record<string, unknown>)
+    assert.equal(nudged.messages.length, 1)
+  })
 })

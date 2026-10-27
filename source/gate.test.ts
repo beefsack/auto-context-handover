@@ -1245,4 +1245,103 @@ describe("auto-context-handover harness", () => {
       /successor creation failed/,
     )
   })
+
+  describe("capped integer soft limits", () => {
+    const setWindow = (fake: Fake, windowTokens: number) => {
+      const ctx = fake.ctx as unknown as {
+        model: {
+          list: () => Promise<{
+            location: Record<string, unknown>
+            data: Array<{ providerID: string; id: string; limit: { context: number; input: number } }>
+          }>
+        }
+      }
+      ctx.model.list = async () => ({
+        location: {},
+        data: [{ providerID: "anthropic", id: "claude", limit: { context: windowTokens, input: windowTokens } }],
+      })
+    }
+
+    const estimateEvent = async (
+      fake: Fake,
+      sessionID: string,
+      tokenSum: number,
+      model?: { providerID: string; id: string },
+      tools: Record<string, unknown> = { bash: {} },
+    ) => {
+      fake.sessions.set(sessionID, {
+        id: sessionID,
+        history: [assistantMessage({ input: tokenSum, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      const event = contextEvent(sessionID, tools, model)
+      await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
+      return event
+    }
+
+    it("caps the 150000 default at 70% on small windows", async () => {
+      const fake = makeFake({})
+      await setup(fake)
+      setWindow(fake, 100000)
+      const quiet = await estimateEvent(fake, "ses_small_quiet", 65000)
+      assert.equal(quiet.messages.length, 0)
+      const nudged = await estimateEvent(fake, "ses_small_nudged", 75000)
+      assert.equal(nudged.messages.length, 1)
+      assert.match(messageText(nudged.messages), /Auto-context-handover (notice|warning|final warning)\./)
+    })
+
+    it("leaves the 150000 default untouched on large windows", async () => {
+      const fake = makeFake({})
+      await setup(fake)
+      setWindow(fake, 300000)
+      const quiet = await estimateEvent(fake, "ses_large_quiet", 140000)
+      assert.equal(quiet.messages.length, 0)
+      const nudged = await estimateEvent(fake, "ses_large_nudged", 155000)
+      assert.equal(nudged.messages.length, 1)
+    })
+
+    it("caps a configured integer soft but never the hard limit", async () => {
+      const fake = makeFake({ soft: 190000, hard: 195000 })
+      await setup(fake)
+      const quiet = await estimateEvent(fake, "ses_cap_quiet", 130000)
+      assert.equal(quiet.messages.length, 0)
+      const warned = await estimateEvent(fake, "ses_cap_warned", 150000)
+      assert.equal(warned.messages.length, 1)
+      assert.match(messageText(warned.messages), /Auto-context-handover (notice|warning|final warning)\./)
+      assert.deepEqual(Object.keys(warned.tools), ["bash"])
+      const hard = await estimateEvent(fake, "ses_cap_hard", 196000, undefined, { bash: {}, context_handover: {} })
+      assert.deepEqual(Object.keys(hard.tools), ["context_handover"])
+      assert.match(messageText(hard.messages), /Only the context_handover tool remains available/)
+    })
+
+    it("caps agent-override integers the same as global soft", async () => {
+      const fake = makeFake({ agentOverrides: { build: 190000 } })
+      await setup(fake)
+      const quiet = await estimateEvent(fake, "ses_ovr_quiet", 130000)
+      assert.equal(quiet.messages.length, 0)
+      const nudged = await estimateEvent(fake, "ses_ovr_nudged", 145000)
+      assert.equal(nudged.messages.length, 1)
+    })
+
+    it("leaves percentage soft values uncapped", async () => {
+      const fake = makeFake({ soft: "90%" })
+      await setup(fake)
+      setWindow(fake, 100000)
+      const quiet = await estimateEvent(fake, "ses_pct_quiet", 75000)
+      assert.equal(quiet.messages.length, 0)
+      const nudged = await estimateEvent(fake, "ses_pct_nudged", 95000)
+      assert.equal(nudged.messages.length, 1)
+    })
+
+    it("applies integer soft with an unknown window while percent fails open", async () => {
+      const integerFake = makeFake({})
+      await setup(integerFake)
+      const nudged = await estimateEvent(integerFake, "ses_unk_int", 155000, { providerID: "unknown", id: "nope" })
+      assert.equal(nudged.messages.length, 1)
+      const percentFake = makeFake({ soft: "70%" })
+      await setup(percentFake)
+      const quiet = await estimateEvent(percentFake, "ses_unk_pct", 155000, { providerID: "unknown", id: "nope" })
+      assert.equal(quiet.messages.length, 0)
+      assert.deepEqual(Object.keys(quiet.tools), ["bash"])
+    })
+  })
 })

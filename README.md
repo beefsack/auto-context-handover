@@ -18,7 +18,7 @@ session or shows review/confirmation UI. Desktop and web do not auto-follow.
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     { "package": "/absolute/path/to/auto-context-handover", "options": {
-      "soft": "70%"
+      "soft": 150000
     } }
   ]
 }
@@ -38,7 +38,7 @@ a clean host restart; inspect load errors before accepting live test evidence.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `soft` | `"70%"` | Warn threshold: `"70%"` string or positive absolute integer tokens. No ratios. Precedence: child prompt marker > agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
+| `soft` | `150000` | Warn threshold: positive integer tokens or a percentage string. No ratios. Integers resolve as `min(value, floor(0.7 * window))`; percentages use their requested percentage without the cap. Precedence: child prompt marker > agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
 | `hard` | unset | Opt-in hard gate, same formats. Past it, every tool except `context_handover` is removed for that request. |
 | `modelOverrides` | `{}` | e.g. `{"anthropic/claude-opus-4-6": "60%", "gpt-5": 90000}`; validated independently. |
 | `agentOverrides` | `{}` | e.g. `{"build": "80%"}` (highest configured precedence); validated independently. |
@@ -54,7 +54,7 @@ Full example:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     { "package": "/absolute/path/to/auto-context-handover", "options": {
-      "soft": "70%",
+      "soft": 150000,
       "hard": "95%",
       "modelOverrides": { "anthropic/claude-opus-4-6": "60%" },
       "agentOverrides": { "build": "80%" },
@@ -67,8 +67,13 @@ Full example:
 
 Low-threshold testing: `{ "soft": 2000, "hard": 4000 }` forces warn/hard
 quickly. Thresholds resolve against the model catalog window (`limit.input`
-preferred, else `limit.context`); unmeasurable requests fail open (no nudge,
-no gate). All-zero provider usage counts as unknown, never as an anchor.
+preferred, else `limit.context`). Integer soft values resolve as
+`min(value, floor(0.7 * window))`, so the default is 150000 tokens or 70% of
+the window, whichever is smaller. The same cap applies to configured integers;
+explicit percentages remain uncapped. Hard limits are uncapped and take priority
+when reached, even if below soft. With an unknown window, integer soft still
+applies, percentage soft fails open, and hard gating is disabled. All-zero
+provider usage counts as unknown; without usable usage there is no nudge or gate.
 
 ### Per-child test override
 
@@ -79,7 +84,8 @@ Start a new subagent's spawn prompt with a namespaced marker line:
 Complete the bounded task below...
 ```
 
-`soft` accepts a positive integer token count or a percentage such as `70%`.
+`soft` accepts the same capped integer tokens or uncapped percentage strings as
+configuration, with the same unknown-window behavior.
 The whitespace-separated `key=value` syntax reserves room for future options;
 only `soft` is implemented. Unknown keys, duplicate keys, malformed pairs and
 invalid values reject the initial child prompt with an explicit error.

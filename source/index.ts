@@ -17,6 +17,7 @@ import {
   nextLoopState,
   parseThreshold,
   resolveModelWindow,
+  resolveSoftTokens,
   resolveThresholdTokens,
   seedTooLarge,
   selectThresholdValue,
@@ -475,9 +476,11 @@ export default Plugin.define({
           scope.providerID,
           scope.modelID,
         )
-        if (window === undefined) return
-        const softTokens = resolveThresholdTokens(parseThreshold(spec), window)
-        const hardTokens = config.hard === undefined ? undefined : resolveThresholdTokens(parseThreshold(config.hard), window)
+        const softTokens = resolveSoftTokens(parseThreshold(spec), window)
+        if (softTokens === undefined) return
+        // Hard limits keep the existing resolution: no 70% cap, and an
+        // unknown window fails open (no gate).
+        const hardTokens = config.hard === undefined || window === undefined ? undefined : resolveThresholdTokens(parseThreshold(config.hard), window)
         const history = await ctx.session.context({ sessionID: event.sessionID }).catch(() => undefined)
         if (!history) return
         const measured = measureSession(history.map(narrow))

@@ -33,7 +33,7 @@ const checkMap = (value: unknown, name: "modelOverrides" | "agentOverrides"): Re
 
 export function parseConfig(options: unknown): HandoverConfig {
   const input = isRecord(options) ? options : {}
-  const soft = input.soft ?? "70%"
+  const soft = input.soft ?? 150000
   try {
     parseThreshold(soft)
   } catch (error) {

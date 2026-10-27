@@ -41,6 +41,16 @@ export function resolveThresholdTokens(spec: ThresholdSpec, windowTokens: number
   return Math.floor(spec.ratio * windowTokens)
 }
 
+/** Cap integer soft values at 70%; unknown windows only disable percentages. */
+export function resolveSoftTokens(spec: ThresholdSpec, windowTokens: number | undefined): number | undefined {
+  if (spec.kind === "percent") {
+    if (windowTokens === undefined) return undefined
+    return Math.floor(spec.ratio * windowTokens)
+  }
+  if (windowTokens === undefined) return spec.tokens
+  return Math.min(spec.tokens, Math.floor(0.7 * windowTokens))
+}
+
 export interface ModelWindow {
   readonly providerID: string
   readonly id: string

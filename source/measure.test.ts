@@ -11,6 +11,7 @@ import {
   parseThreshold,
   productiveHandover,
   resolveModelWindow,
+  resolveSoftTokens,
   resolveThresholdTokens,
   seedTooLarge,
   selectThresholdValue,
@@ -62,12 +63,35 @@ describe("selectThresholdValue", () => {
   })
 })
 
+describe("resolveSoftTokens", () => {
+  it("caps integers at 70% of the window", () => {
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 150000 }, 200000), 140000)
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 190000 }, 200000), 140000)
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 70000 }, 100000), 70000)
+  })
+  it("leaves integers below the cap untouched", () => {
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 150000 }, 300000), 150000)
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 1000 }, 200000), 1000)
+  })
+  it("applies integers with an unknown window", () => {
+    assert.equal(resolveSoftTokens({ kind: "tokens", tokens: 150000 }, undefined), 150000)
+  })
+  it("resolves percents against the window without a 70% cap", () => {
+    assert.equal(resolveSoftTokens({ kind: "percent", ratio: 0.9 }, 100000), 90000)
+    assert.equal(resolveSoftTokens({ kind: "percent", ratio: 0.7 }, 200000), 140000)
+  })
+  it("fails open for percents with an unknown window", () => {
+    assert.equal(resolveSoftTokens({ kind: "percent", ratio: 0.7 }, undefined), undefined)
+  })
+})
+
 describe("resolveThresholdTokens", () => {
   it("resolves percent against the window", () => {
     assert.equal(resolveThresholdTokens({ kind: "percent", ratio: 0.7 }, 200000), 140000)
   })
-  it("passes absolute tokens through", () => {
+  it("passes absolute tokens through uncapped (hard limits)", () => {
     assert.equal(resolveThresholdTokens({ kind: "tokens", tokens: 12345 }, 200000), 12345)
+    assert.equal(resolveThresholdTokens({ kind: "tokens", tokens: 190000 }, 200000), 190000)
   })
 })
 
