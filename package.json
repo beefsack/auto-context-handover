@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "auto-context-handover",
+  "version": "0.1.0",
+  "description": "Measured soft-limit handover plugin for OpenCode V2: warns, hard-gates, and rotates the agent-written handover into a fresh session.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./index.ts",
+  "files": [
+    "index.ts",
+    "source",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p source/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@opencode/ai": "2.1.4",
+    "@opencode/schema": "2.1.4",
+    "effect": "4.0.1"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "2.1.4"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.1.4",
+    "@types/node": "22.10.2",
+    "typescript": "5.7.3"
+  }
+}
