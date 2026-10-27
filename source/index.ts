@@ -24,7 +24,8 @@ import {
   type ThresholdScope,
 } from "./measure.ts"
 import { allKeys, keys, HANDOVER_TOOL, READ_TOOL, isRecord } from "./store.ts"
-import type { StoredDraft, StoredHandover, StoredLink, StoredLock, StoredState } from "./store.ts"
+import type { StoredDraft, StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
+import { matchSoftMarker, resolveSoftMarker } from "./soft-marker.ts"
 import {
   buildDraftDirective,
   buildDraftNotice,
@@ -96,6 +97,11 @@ const asStoredState = (value: Record<string, unknown> | undefined): StoredState 
 const asStoredLink = (value: Record<string, unknown> | undefined): StoredLink | undefined => {
   if (!value || typeof value.sessionID !== "string") return undefined
   return { sessionID: value.sessionID, at: typeof value.at === "number" ? value.at : 0 }
+}
+
+const asStoredSoftOverride = (value: Record<string, unknown> | undefined): StoredSoftOverride | undefined => {
+  if (!value || !("value" in value)) return undefined
+  return { value: value.value, at: typeof value.at === "number" ? value.at : 0 }
 }
 
 const HandoverInput = Schema.Struct({
@@ -481,7 +487,19 @@ export default Plugin.define({
           return
         }
         const scope: ThresholdScope = { agent: event.agent, providerID: event.model.providerID, modelID: event.model.id }
-        const spec = selectThresholdValue(config, scope)
+        // A stored child soft marker outranks agent/model/global config. The
+        // value was validated before persisting; a corrupt entry falls back
+        // to config instead of failing the request. Hard limits are unaffected.
+        const storedSoft = asStoredSoftOverride(await readJson(ctx, keys.softOverride(event.sessionID)))
+        let spec: unknown = selectThresholdValue(config, scope)
+        if (storedSoft) {
+          try {
+            parseThreshold(storedSoft.value)
+            spec = storedSoft.value
+          } catch {
+            // Corrupt entry: keep the configured spec (fail open).
+          }
+        }
         const models = await ctx.model.list().catch(() => undefined)
         const window = resolveModelWindow(
           models?.data?.map((model) => ({ providerID: model.providerID, id: model.id, limit: model.limit })),
@@ -513,6 +531,38 @@ export default Plugin.define({
       } catch {
         // Fail open: any measurement or host failure leaves the request untouched.
       }
+    })
+
+    // Subagent soft marker: parse only the initial prompt of a real child
+    // session, allowing OpenCode's standard subagent banner. Scope and host
+    // reads fail open (text untouched). With empty history no prompt was
+    // admitted yet, so a retry parses, persists (replacing any unadmitted
+    // value), and strips again. A scoped marker with unknown, duplicate, or
+    // invalid keys rejects the prompt, and a failed override write blocks
+    // admission with the marker intact so a retry parses again.
+    await ctx.session.hook("prompt", async (event) => {
+      const sessionID = typeof event.sessionID === "string" ? event.sessionID : undefined
+      const text = typeof event.prompt?.text === "string" ? event.prompt.text : undefined
+      if (sessionID === undefined || text === undefined) return
+      // Prefix-only: quoted text, tool results, and mid-text brackets never match.
+      const matched = matchSoftMarker(text)
+      if (!matched) return
+      const info = await ctx.session.get({ sessionID }).catch(() => undefined)
+      if (!info || !info.parentID) return
+      const history = await ctx.session.context({ sessionID }).catch(() => undefined)
+      if (!Array.isArray(history) || history.length > 0) return
+      const parsed = resolveSoftMarker(matched)
+      try {
+        await ctx.storage.set(
+          keys.softOverride(sessionID),
+          { value: parsed.value, at: Date.now() } as unknown as Parameters<typeof ctx.storage.set>[1],
+        )
+      } catch (error) {
+        throw new Error(
+          `auto-context-handover: failed to persist subagent soft override for ${sessionID}, prompt NOT admitted: ${(error as Error).message}`,
+        )
+      }
+      event.prompt.text = parsed.text
     })
 
     // Shared event stream. SubscribeOptions carries an optional AbortSignal

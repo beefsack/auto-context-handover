@@ -7,8 +7,10 @@
 
 ## Live Testing
 
-- Before any live or model-invoked testing, follow the isolated manual plan in `README.md` (separate `/tmp/opencode` directory, never the live config). This does not grant mutation authorization.
-- Ask the user to choose the model explicitly for each live test run. Require that model as a per-run argument or environment variable with no default; never hardcode or select a model in test files, scripts, or configs.
+- Root-session live tests follow the isolated manual plan in `README.md` (separate `/tmp/opencode` directory, never the live config). This does not grant mutation authorization.
+- For each isolated run, ask the user to choose the model explicitly. Require it as a per-run argument or environment variable with no default; scripts must reject unset or empty values before invoking OpenCode. Never hardcode or select a model in test files, scripts, or configs.
+- Child behavior may be tested from the live session using ordinary `worker` subagents whose spawn prompts start with `[auto-context-handover-test soft=4096]` (adjust soft as needed). Use their configured model, never a model override. Keep checks bounded and give them at least two model turns; workers cannot spawn agents.
+- The live host loads this working tree directly. Keep source edits coherent and run typecheck before any live test spawn.
 
 ## Local-System Information
 

@@ -27,15 +27,19 @@ session's forward link.
 Run `npm install` once in this directory (runtime deps for the plugin host).
 No build step: the host resolves the root `index.ts` shim and loads `source/`
 directly. Node >= 22.18 is required for the `.ts` tests.
+Local source changes are watched for automatic plugin reload. Keep related
+edits coherent: a failed import can leave the previous generation active.
+In one live check, a stale missing-export failure persisted across saves until
+a clean host restart; inspect load errors before accepting live test evidence.
 
 ## Config reference
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `soft` | `"70%"` | Warn threshold: `"70%"` string or positive absolute integer tokens. No ratios. Precedence: agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
+| `soft` | `"70%"` | Warn threshold: `"70%"` string or positive absolute integer tokens. No ratios. Precedence: child prompt marker > agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
 | `hard` | unset | Opt-in hard gate, same formats. Past it, every tool except `context_handover` is removed for that request. |
 | `modelOverrides` | `{}` | e.g. `{"anthropic/claude-opus-4-6": "60%", "gpt-5": 90000}`; validated independently. |
-| `agentOverrides` | `{}` | e.g. `{"build": "80%"}` (highest precedence); validated independently. |
+| `agentOverrides` | `{}` | e.g. `{"build": "80%"}` (highest configured precedence); validated independently. |
 | `stages` | `[0, 0.1, 0.2]` | Nudge boundaries relative to soft: warn at soft, then soft*(1+offset). Must be 3 ascending offsets starting at 0; stage texts are fixed. |
 | `onHandover.primary` | `"new-session"` | `"new-session"` starts a linked successor; `"lock"` stops with no tools; `"draft"` stores the handover without a successor and pauses for review with only `read_handover`. Other values (including `reset` or the old flat string) are setup errors. |
 | `onHandover.subagent` | `"return"` | Only `"return"` is supported. Anything else is a setup error. |
@@ -63,6 +67,31 @@ Low-threshold testing: `{ "soft": 2000, "hard": 4000 }` forces warn/hard
 quickly. Thresholds resolve against the model catalog window (`limit.input`
 preferred, else `limit.context`); unmeasurable requests fail open (no nudge,
 no gate). All-zero provider usage counts as unknown, never as an anchor.
+
+### Per-child test override
+
+Start a new subagent's spawn prompt with a namespaced marker line:
+
+```text
+[auto-context-handover-test soft=4096]
+Complete the bounded task below...
+```
+
+`soft` accepts a positive integer token count or a percentage such as `70%`.
+The whitespace-separated `key=value` syntax reserves room for future options;
+only `soft` is implemented. Unknown keys, duplicate keys, malformed pairs and
+invalid values reject the initial child prompt with an explicit error.
+
+The plugin recognizes only the beginning of a real child's initial prompt,
+allowing OpenCode's standard subagent banner. It awaits session-keyed storage
+before removing the marker from admitted text. Root prompts, later prompts,
+quoted material and tool results are not scanned. The override outranks all
+configured soft values without changing `hard`, nudges or child return behavior.
+It needs no configuration edit or restart, survives reload and compaction,
+and is deleted with the child. Descendants and successors do not inherit it.
+The first request still needs usable assistant usage before it can be nudged:
+give tests at least two model turns, for example by requiring successive tool
+calls before completion.
 
 ## Behavior
 
@@ -101,7 +130,7 @@ plugins expose no full-history API and `ctx.session.context` is filtered
 (`packages/core/src/session/history.ts:149-179`), so the full text cannot be recovered from the
 transcript later. The handover body is therefore stored under
 `auto-context-handover:handover:<sessionID>` (lock, draft pause, loop state,
-and forward/back links beside it) and removed with the session on `session.deleted`.
+child soft override and forward/back links beside it) and removed with the session on `session.deleted`.
 `read_handover` is a direct (`codemode: false`) tool returning the full
 text with `metadata: { truncated: false }`, which bypasses the host's
 tool-output truncation instead of spilling to a file. It returns only the
@@ -111,7 +140,7 @@ expected behavior, not a safety feature.
 
 ## Manual test plan
 
-Each check runs against an isolated project directory (never the live
+Root-session checks run against an isolated project directory (never the live
 config): create `/tmp/opencode/ch-manual`, put an `opencode.jsonc` with the
 `$schema` property and this package in `plugins`, and start `opencode` there.
 Use `{ "soft": 2000 }` (or similar) so one short exchange crosses the
@@ -121,6 +150,8 @@ Ask the user to choose the model explicitly for each live run, and pass it
 as a required per-run argument or environment variable with no default.
 Never hardcode or pick a model in test files, scripts, or configs. If the
 chosen model is rejected, stop rather than substitute another model.
+Scripts must reject both unset and empty model arguments/environment variables
+before invoking OpenCode; an empty `--model` can otherwise select a default.
 Give sessions explicit titles so automatic title generation cannot select
 a different model for an auxiliary request.
 Check a context observer's `event.model` against the requested model before
@@ -178,11 +209,20 @@ injected directives; a model's description of its tools alone is not proof.
    Expect: the fresh session reads and continues, with no automatic links.
 
 4. Child return and parent read.
-   Do: from a parent session, launch a subagent that crosses soft and calls
-   `context_handover` with a short summary.
+   Do: from the live parent session, launch an ordinary `worker` with a spawn
+   prompt starting with `[auto-context-handover-test soft=4096]`, adjusting soft
+   for fixed prompt overhead. Use its configured model, without a model
+   override or live configuration edits. Run typecheck first: the live host
+   loads this working tree directly. Keep this to one or two spawns and require
+   at least two model turns before completion, such as successive tool calls.
+   The child must wait for the nudge, finish its bounded unit, and call
+   `context_handover` with a short summary. Workers cannot spawn other agents.
    Expect: the child returns only the short summary plus its session ID and
    a `read_handover` hint (never the full text); the child locks; the parent
    reads the full text via `read_handover` with the child session ID.
+   A live marker check confirmed stripping, the model-observed nudge, one
+   handover call, the short child return and full parent readback. Reload,
+   compaction, deletion, rejection and non-inheritance cases have unit coverage.
 
 5. Hard gate.
    Do: set `hard` just above `soft`, push usage past it, and ask the agent
@@ -223,7 +263,7 @@ injected directives; a model's description of its tools alone is not proof.
    `read_handover` for it.
    Expect: the read reports the session does not exist. KV cleanup
    (handover, lock, draft pause, loop state, both links) is covered in the
-   harness, not inspectable via the read tool.
+   harness, not inspectable via the read tool. This includes child soft overrides.
 
 ## Limitations
 

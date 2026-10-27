@@ -14,6 +14,7 @@ export const keys = {
   state: (sessionID: string) => `${PREFIX}:state:${sessionID}`,
   forward: (sessionID: string) => `${PREFIX}:link:forward:${sessionID}`,
   back: (sessionID: string) => `${PREFIX}:link:back:${sessionID}`,
+  softOverride: (sessionID: string) => `${PREFIX}:soft-override:${sessionID}`,
 }
 
 export const allKeys = (sessionID: string): string[] => [
@@ -23,6 +24,7 @@ export const allKeys = (sessionID: string): string[] => [
   keys.state(sessionID),
   keys.forward(sessionID),
   keys.back(sessionID),
+  keys.softOverride(sessionID),
 ]
 
 export interface StoredHandover {
@@ -54,6 +56,11 @@ export interface StoredState {
 
 export interface StoredLink {
   readonly sessionID: string
+  readonly at: number
+}
+
+export interface StoredSoftOverride {
+  readonly value: unknown
   readonly at: number
 }
 
