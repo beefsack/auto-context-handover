@@ -3,13 +3,16 @@
 import { describe, it, mock } from "node:test"
 import assert from "node:assert/strict"
 import type { AgentInfo, CatchNext, ClassicSubagentStopResult, Engine, On, PlainCatchHook, ToolCallResult } from "./claude-types.ts"
-import { register } from "./register.ts"
+import { register, reclaimForWrite, resolveChainOf } from "./register.ts"
 import {
+  activityKey,
   buildChildShortReply,
+  buildChildTombstone,
   buildClaudeChildIntro,
   buildClaudeChildNudge,
   buildClaudeRootIntro,
   buildClaudeSuccessorSeed,
+  buildExpiredReadback,
   buildGenerationLine,
   buildHandoverStoredInstruction,
   buildLockedChildReply,
@@ -18,20 +21,35 @@ import {
   buildSuccessorPointer,
   CHILD_HANDOVER_DESCRIPTION,
   CHILD_READ_DESCRIPTION,
+  CHILD_SUMMARY_PREFIX,
+  classifyChain,
   classifySuccessorMarker,
   countNextSteps,
   estimateSeedTokens,
+  estimateStoreBytes,
   formatHandbackDelivered,
+  groupChains,
   HANDOVER_FULL,
+  isChainPin,
+  isChildTombstone,
   isSeedTooLarge,
   mergeProvenance,
+  orderEvictableChains,
   originalRecordKey,
   parseSuccessorMarker,
+  pinKey,
   READ_BEFORE_DECISION,
   READ_FULL,
+  shortReplyOf,
+  spawnRecordKey,
+  childRecordKey,
+  STORE_BUDGET_BYTES,
   SUCCESSOR_MARKER_TAG,
+  utf8ByteLength,
   type ChildRecord,
+  type ChildTombstone,
   type OriginalRecord,
+  type SpawnProvenance,
 } from "./child.ts"
 import { HANDOVER_SECTIONS } from "../source/shared/handover-text.ts"
 import { HANDOVER_DESCRIPTION } from "../source/text.ts"
@@ -48,8 +66,10 @@ interface Fake {
   store: Map<string, unknown>
   readFailKeys: Set<string>
   writeFailKeys: Set<string>
+  deleteFailKeys: Set<string>
   agents: AgentInfo[]
   listFails: boolean
+  keysFails: boolean
   sessionID: string
   sessionsFails: boolean
   $: Engine
@@ -61,6 +81,7 @@ const makeFake = (options?: { soft?: unknown }): Fake & { registerOptions: { sof
   const store = new Map<string, unknown>()
   const readFailKeys = new Set<string>()
   const writeFailKeys = new Set<string>()
+  const deleteFailKeys = new Set<string>()
   const fake = {
     handlers,
     catches: new Map<string, PlainCatchHook<Record<string, unknown>, unknown>>(),
@@ -68,8 +89,10 @@ const makeFake = (options?: { soft?: unknown }): Fake & { registerOptions: { sof
     store,
     readFailKeys,
     writeFailKeys,
+    deleteFailKeys,
     agents: [] as AgentInfo[],
     listFails: false,
+    keysFails: false,
     sessionID: "ses_host",
     sessionsFails: false,
     registerOptions: options ?? {},
@@ -94,7 +117,12 @@ const makeFake = (options?: { soft?: unknown }): Fake & { registerOptions: { sof
         store.set(key, value)
       },
       delete: async (key: string) => {
+        if (deleteFailKeys.has(key)) throw new Error(`injected store delete failure for ${key}`)
         store.delete(key)
+      },
+      keys: async () => {
+        if (fake.keysFails) throw new Error("injected store keys failure")
+        return [...store.keys()]
       },
     },
     agent: {
@@ -252,7 +280,7 @@ describe("hook catch policies", () => {
     const fake = makeFake()
     setup(fake)
     assert.deepEqual([...fake.catches.keys()].sort(), [
-      "agent.spawn", "classic.PostToolBatch", "classic.SessionStart", "classic.SubagentStart", "classic.SubagentStop", "session.start", "tool.call",
+      "agent.spawn", "classic.PostToolBatch", "classic.SessionStart", "classic.SubagentStart", "classic.SubagentStop", "session.end", "session.start", "tool.call", "turn.complete",
     ])
   })
 
@@ -304,7 +332,7 @@ describe("hook catch policies", () => {
       await handOver(fake, "a1", "accepted verbatim")
       const stored = fake.store.get("child:a1") as ChildRecord
       const event = { tool: "SubagentHandback", agentId: "a1", message: "original report" }
-      const rewritten = { ...event, message: stored.shortReply }
+      const rewritten = { ...event, message: shortReplyOf(stored) }
       for (const prior of [{ result: "native success" }, { deny: "classifier refusal" }, { result: "native failure", isError: true }]) {
         const { result, seen } = await runCatch(fake, "tool.call", event, kind, prior, rewritten)
         assert.equal(result, prior)
@@ -477,7 +505,7 @@ describe("claude child adapter registration", () => {
     setup(fake)
     for (const event of [...fake.handlers.keys()]) {
       assert.ok(
-        ["session.start", "turn.step", "classic.SessionStart", "classic.PostToolBatch", "classic.SubagentStart", "classic.SubagentStop", "agent.spawn", "tool.call"].includes(event),
+        ["session.start", "session.end", "turn.step", "turn.complete", "classic.SessionStart", "classic.PostToolBatch", "classic.SubagentStart", "classic.SubagentStop", "agent.spawn", "tool.call"].includes(event),
         `unexpected hook ${event}`,
       )
     }
@@ -815,11 +843,15 @@ describe("context_handover tool", () => {
     const stored = fake.store.get("child:a1") as ChildRecord
     assert.equal(stored.handover, body)
     assert.equal(stored.handbackDelivered, false)
+    // Single canonical representation: new records persist the lossless
+    // summary; the short reply is derived, with legacy persisted replies used as-is.
     assert.equal(stored.summary, "did work")
+    assert.equal(stored.shortReply, undefined)
     assert.equal(stored.agentId, "a1")
     assert.equal(stored.parentSessionId, "ses_host")
     assert.equal(stored.closed, true)
-    assert.equal(Object.keys(Object.fromEntries(fake.store)).length, 1)
+    assert.ok(fake.store.has("child:a1"))
+    assert.ok([...fake.store.keys()].every((key) => key === "child:a1" || key.startsWith("activity:") || key.startsWith("pin:")))
   })
 
   it("denies duplicates without overwriting", async () => {
@@ -983,7 +1015,7 @@ describe("SubagentHandback forwarding", () => {
       assert.equal(input.tool_use_id, "hb1")
       assert.equal(input.agentId, "a1")
       assert.equal(input.extra, 7)
-      assert.equal(input.message, stored.shortReply)
+      assert.equal(input.message, shortReplyOf(stored))
     }
   })
 
@@ -1097,6 +1129,34 @@ describe("read_handover tool", () => {
     const denied = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "nobody" })
     assert.match(String(denied.deny), /storage unavailable/)
   })
+
+  it("bounds the spawn provenance cache across read_handover hydration", async () => {
+    const fake = makeFake()
+    setup(fake)
+    const count = 1001
+    for (let i = 0; i < count; i += 1) {
+      const id = `hyd${i}`
+      fake.store.set(`child:${id}`, {
+        handover: "body",
+        summary: `s ${id}`,
+        agentId: id,
+        closed: true,
+        storedAt: 1,
+      })
+      fake.store.set(`spawn:${id}`, { agentType: `type-${i}`, modelOverride: null, storedAt: 1 })
+    }
+    for (let i = 0; i < count; i += 1) {
+      const read = await toolCall(fake, { tool: READ_FULL, tool_use_id: `r${i}`, childId: `hyd${i}` })
+      assert.match(String(read.result), new RegExp(`recorded: type-${i}`))
+    }
+    // Oldest hydration is evicted; newest stays cached when the store goes dark.
+    fake.readFailKeys.add("spawn:hyd0")
+    fake.readFailKeys.add(`spawn:hyd${count - 1}`)
+    const oldest = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r-old", childId: "hyd0" })
+    assert.match(String(oldest.result), /recorded: unknown/)
+    const newest = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r-new", childId: `hyd${count - 1}` })
+    assert.match(String(newest.result), new RegExp(`recorded: type-${count - 1}`))
+  })
 })
 
 describe("classic.SubagentStop correction", () => {
@@ -1163,7 +1223,7 @@ describe("classic.SubagentStop correction", () => {
     assert.match(String(first.block), /locked after a context handover/)
     assert.match(String(first.block), /Context handover \(incomplete\):/)
     assert.match(String(first.block), /read_handover\(\{"childId":"a1"\}\)/)
-    assert.ok(!String(first.block).includes((fake.store.get("child:a1") as ChildRecord).shortReply) || String(first.block).includes("locked after a context handover"))
+    assert.ok(!String(first.block).includes(shortReplyOf(fake.store.get("child:a1") as ChildRecord)) || String(first.block).includes("locked after a context handover"))
     const second = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: "other text" })
     assert.equal(second.block, undefined)
   })
@@ -1200,10 +1260,10 @@ describe("classic.SubagentStop correction", () => {
     await runStep(fake, { agentId: "a1", turnId: "t1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
     await handOver(fake, "a1", "body")
     const stored = fake.store.get("child:a1") as ChildRecord
-    const corrected = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: stored.shortReply })
+    const corrected = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: shortReplyOf(stored, stored) })
     assert.match(String(corrected.block), /Call SubagentHandback now/)
     assert.match(String(corrected.block), /may not reach your parent/)
-    assert.ok(String(corrected.block).includes(stored.shortReply))
+    assert.ok(String(corrected.block).includes(shortReplyOf(stored, stored)))
     const active = await stopHook(fake, { agent_id: "a1", stop_hook_active: true, last_assistant_message: "other" })
     assert.deepEqual(active, { agent_id: "a1", stop_hook_active: true, last_assistant_message: "other" })
   })
@@ -1432,10 +1492,10 @@ describe("locked follow-up, honest status, and diagnostics", () => {
         return { result: "delivered" }
       }) as never)) as { result?: unknown }
       assert.equal(outcome.result, "delivered")
-      assert.equal(seen[0]?.message, stored.shortReply)
+      assert.equal(seen[0]?.message, shortReplyOf(stored))
     }
-    const stop = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: stored.shortReply })
-    assert.deepEqual(stop, { agent_id: "a1", stop_hook_active: false, last_assistant_message: stored.shortReply })
+    const stop = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: shortReplyOf(stored) })
+    assert.deepEqual(stop, { agent_id: "a1", stop_hook_active: false, last_assistant_message: shortReplyOf(stored) })
   })
 
   it("refuses legacy and unknown turn identities with the locked reply", async () => {
@@ -1618,7 +1678,12 @@ describe("agent.spawn provenance", () => {
     const { result, seen } = await spawn(fake, { subagentType: "Explore", model: "opus", fork: false }, { model: "resolved-id", agentId: "c1" })
     assert.deepEqual(result, { model: "resolved-id", agentId: "c1" })
     assert.deepEqual(seen, [{ subagentType: "Explore", model: "opus", fork: false }])
-    assert.deepEqual(fake.store.get("spawn:c1"), { agentType: "Explore", modelOverride: "opus", originAgentId: "c1", generation: 1 })
+    const spawnC1 = fake.store.get("spawn:c1") as Record<string, unknown>
+    assert.equal(spawnC1.agentType, "Explore")
+    assert.equal(spawnC1.modelOverride, "opus")
+    assert.equal(spawnC1.originAgentId, "c1")
+    assert.equal(spawnC1.generation, 1)
+    assert.equal(typeof spawnC1.storedAt, "number")
     await runStep(fake, { agentId: "c1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
     const done = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c1", handover: "body", summary: "s" })
     assert.match(String(done.result), /same agent type \(recorded: Explore\)/)
@@ -1637,17 +1702,18 @@ describe("agent.spawn provenance", () => {
     fake.agents = [{ id: "c2", type: "general-purpose", status: "running" }, { id: "c3", type: "general-purpose", status: "running" }]
     await spawn(fake, { subagentType: "Plan" }, { model: "m", agentId: "c2" })
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c2", handover: "b", summary: "s" })
-    assert.match(String((fake.store.get("child:c2") as ChildRecord).shortReply), /\(recorded: no override\)/)
-    assert.ok(!String((fake.store.get("child:c2") as ChildRecord).shortReply).includes("unknown"))
+    const c2 = fake.store.get("child:c2") as ChildRecord
+    assert.match(shortReplyOf(c2, c2), /\(recorded: no override\)/)
+    assert.ok(!shortReplyOf(c2, c2).includes("unknown"))
     await spawn(fake, { subagentType: "Plan", model: "opus", fork: true }, { model: "parent-model", agentId: "c3" })
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "c3", handover: "b", summary: "s" })
-    assert.match(String((fake.store.get("child:c3") as ChildRecord).shortReply), /\(recorded: no override\)/)
+    assert.match(shortReplyOf(fake.store.get("child:c3") as ChildRecord, fake.store.get("child:c3") as ChildRecord), /\(recorded: no override\)/)
     // Reload without spawn metadata stays unknown and honest.
     const reload = makeFake()
     setup(reload)
     reload.agents = [{ id: "c4", type: "general-purpose", status: "running" }]
     await toolCall(reload, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c4", handover: "b", summary: "s" })
-    assert.match(String((reload.store.get("child:c4") as ChildRecord).shortReply), /\(recorded: unknown, use predecessor spawn params\)/)
+    assert.match(shortReplyOf(reload.store.get("child:c4") as ChildRecord), /\(recorded: unknown, use predecessor spawn params\)/)
   })
 
   it("handles denied/malformed spawns, teammates, and legacy records without enabling handovers", async () => {
@@ -1675,7 +1741,12 @@ describe("agent.spawn provenance", () => {
     await spawn(after, { subagentType: "Other", model: "other" }, { model: "m", agentId: "a1" })
     assert.equal((after.store.get("child:a1") as ChildRecord).handover, "first")
     assert.equal((after.store.get("child:a1") as ChildRecord).agentType, undefined)
-    assert.deepEqual(after.store.get("spawn:a1"), { agentType: "Other", modelOverride: "other", originAgentId: "a1", generation: 1 })
+    const spawnA1 = after.store.get("spawn:a1") as Record<string, unknown>
+    assert.equal(spawnA1.agentType, "Other")
+    assert.equal(spawnA1.modelOverride, "other")
+    assert.equal(spawnA1.originAgentId, "a1")
+    assert.equal(spawnA1.generation, 1)
+    assert.equal(typeof spawnA1.storedAt, "number")
     const mergedRead = String((await toolCall(after, { tool: READ_FULL, tool_use_id: "r1", childId: "a1" })).result)
     assert.match(mergedRead, /same agent type \(recorded: Other\)/)
     assert.match(mergedRead, /generation 1/)
@@ -1695,8 +1766,8 @@ describe("agent.spawn provenance", () => {
     const stored = fake.store.get("child:a9") as ChildRecord
     assert.equal(stored.agentType, "Explore")
     assert.equal(stored.modelOverride, undefined)
-    assert.match(String(stored.shortReply), /same agent type \(recorded: Explore\)/)
-    assert.match(String(stored.shortReply), /same model override \(recorded: unknown, use predecessor spawn params\)/)
+    assert.match(shortReplyOf(stored, stored), /same agent type \(recorded: Explore\)/)
+    assert.match(shortReplyOf(stored, stored), /same model override \(recorded: unknown, use predecessor spawn params\)/)
   })
 
   it("preserves spawn lineage when SubagentStart fills a missing type", async () => {
@@ -1738,7 +1809,12 @@ describe("agent.spawn provenance", () => {
     setup(fake)
     fake.agents = [{ id: "r1", type: "general-purpose", status: "running" }, { id: "r2", type: "general-purpose", status: "running" }]
     await spawn(fake, { subagentType: "Explore", model: "opus" }, { model: "resolved", agentId: "r1" })
-    assert.deepEqual(fake.store.get("spawn:r1"), { agentType: "Explore", modelOverride: "opus", originAgentId: "r1", generation: 1 })
+    const spawnR1 = fake.store.get("spawn:r1") as Record<string, unknown>
+    assert.equal(spawnR1.agentType, "Explore")
+    assert.equal(spawnR1.modelOverride, "opus")
+    assert.equal(spawnR1.originAgentId, "r1")
+    assert.equal(spawnR1.generation, 1)
+    assert.equal(typeof spawnR1.storedAt, "number")
     // New registration sharing the same store content: persisted metadata is found.
     const reloaded = makeFake()
     for (const [key, value] of fake.store) reloaded.store.set(key, value)
@@ -1750,7 +1826,7 @@ describe("agent.spawn provenance", () => {
     // A child with no spawn entry stays honestly unknown after the same reload.
     await toolCall(reloaded, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "r2", handover: "b", summary: "s" })
     assert.equal((reloaded.store.get("child:r2") as ChildRecord).agentType, undefined)
-    assert.match(String((reloaded.store.get("child:r2") as ChildRecord).shortReply), /\(recorded: unknown, use predecessor spawn params\)/)
+    assert.match(shortReplyOf(reloaded.store.get("child:r2") as ChildRecord), /\(recorded: unknown, use predecessor spawn params\)/)
   })
 
   it("degrades honestly when spawn persistence fails, preserving the spawn result", async () => {
@@ -1768,15 +1844,29 @@ describe("agent.spawn provenance", () => {
     setup(reloaded)
     reloaded.agents = [{ id: "w1", type: "general-purpose", status: "running" }]
     await toolCall(reloaded, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "w1", handover: "b", summary: "s" })
-    assert.match(String((reloaded.store.get("child:w1") as ChildRecord).shortReply), /\(recorded: unknown, use predecessor spawn params\)/)
-    // A spawn-meta read outage at handover time also degrades to unknown.
+    assert.match(shortReplyOf(reloaded.store.get("child:w1") as ChildRecord), /\(recorded: unknown, use predecessor spawn params\)/)
+    // A spawn-meta read outage at handover time leaves the retention scan
+    // incomplete, so the write is refused explicitly (retryable): nothing is
+    // stored and the child is not locked. Clearing the outage and retrying
+    // the same call then succeeds with the persisted provenance.
     const outage = makeFake()
     setup(outage)
     outage.agents = [{ id: "w2", type: "general-purpose", status: "running" }]
     outage.store.set("spawn:w2", { agentType: "Explore", modelOverride: "opus" })
     outage.readFailKeys.add("spawn:w2")
     const done = await toolCall(outage, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "w2", handover: "b", summary: "s" })
-    assert.match(String(done.result), /\(recorded: unknown, use predecessor spawn params\)/)
+    assert.equal(done.result, undefined)
+    assert.match(String(done.deny), /storage budget refuses the write/)
+    assert.match(String(done.deny), /Retry the same call/)
+    assert.match(String(done.deny), /nothing was stored and the child is not locked/)
+    assert.equal(outage.store.get("child:w2"), undefined)
+    // No lock was taken: an ordinary tool still passes through to next.
+    const passthrough = await toolCall(outage, { tool: "Bash", tool_use_id: "t2", agentId: "w2" })
+    assert.match(String(passthrough.result), /^passed:Bash$/)
+    outage.readFailKeys.delete("spawn:w2")
+    const retried = await toolCall(outage, { tool: HANDOVER_FULL, tool_use_id: "t3", agentId: "w2", handover: "b", summary: "s" })
+    assert.match(String(retried.result), /same agent type \(recorded: Explore\)/)
+    assert.match(String(retried.result), /same model override \(recorded: opus\)/)
   })
 
   it("tolerates malformed provenance on stored records without throwing", async () => {
@@ -1912,8 +2002,8 @@ describe("handback delivery contract", () => {
     assert.match(text, /The adapter forwards your SubagentHandback message carrying the stored short reply below/)
     assert.match(text, /observed only through the tool result/)
     assert.match(text, /last resort only when the SubagentHandback tool is absent/)
-    assert.ok(text.includes(stored.shortReply))
-    assert.equal(buildHandoverStoredInstruction(stored.shortReply), text)
+    assert.ok(text.includes(shortReplyOf(stored)))
+    assert.equal(buildHandoverStoredInstruction(shortReplyOf(stored)), text)
   })
 
   it("mandates handback-then-stop in child guidance with absent-tool-only plain text", async () => {
@@ -1931,9 +2021,9 @@ describe("handback delivery contract", () => {
     await runStep(fake, { agentId: "a1", turnId: "t1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
     await handOver(fake, "a1", "body")
     const stored = fake.store.get("child:a1") as ChildRecord
-    const corrected = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: stored.shortReply })
+    const corrected = await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: shortReplyOf(stored, stored) })
     assert.match(String(corrected.block), /Call SubagentHandback now/)
-    assert.ok(String(corrected.block).includes(stored.shortReply))
+    assert.ok(String(corrected.block).includes(shortReplyOf(stored, stored)))
     assert.equal((await stopHook(fake, { agent_id: "a1", stop_hook_active: false, last_assistant_message: stored.shortReply })).block, undefined)
   })
 
@@ -2190,7 +2280,12 @@ describe("reference lineage: marker, originals, generations", () => {
     const stored = fake.store.get("child:race1") as ChildRecord
     assert.equal(stored.handover, handoverBody(["read a"]))
     // Standalone metadata persisted despite the already-closed record.
-    assert.deepEqual(fake.store.get("spawn:race1"), { agentType: "general-purpose", modelOverride: null, originAgentId: "race1", generation: 1 })
+    const spawnRace1 = fake.store.get("spawn:race1") as Record<string, unknown>
+    assert.equal(spawnRace1.agentType, "general-purpose")
+    assert.equal(spawnRace1.modelOverride, null)
+    assert.equal(spawnRace1.originAgentId, "race1")
+    assert.equal(spawnRace1.generation, 1)
+    assert.equal(typeof spawnRace1.storedAt, "number")
     const compactRace = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "race1" })).result)
     assert.ok(!compactRace.includes(original))
     const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "race1", full: true })).result)
@@ -2239,6 +2334,7 @@ describe("reference lineage: marker, originals, generations", () => {
       store: {
         get: backing.get.bind(backing),
         delete: backing.delete.bind(backing),
+        keys: backing.keys.bind(backing),
         set: async (key: string, value: unknown) => {
           if (key === originalRecordKey("q1")) throw new Error("quota exceeded: plugin storage budget exhausted")
           return backing.set(key, value)
@@ -2820,5 +2916,851 @@ describe("shared wording across both adapters", () => {
     assert.ok(CHILD_HANDOVER_DESCRIPTION.includes(HANDOVER_SECTIONS))
     assert.ok(buildClaudeRootIntro().includes("targeted rereads are allowed only to resolve open questions"))
     assert.ok(buildClaudeChildIntro().includes("targeted rereads are allowed only to resolve open questions"))
+  })
+})
+
+describe("size retention acceptance", () => {
+  const spawn = async (
+    fake: Fake,
+    event: Record<string, unknown>,
+    answer: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const hook = only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    return hook(fake.$, event, async () => ({ ...answer }))
+  }
+
+  const startChild = async (f: Fake, id: string): Promise<void> => {
+    const hook = only(f, "classic.SubagentStart") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    await hook(f.$, { agent_id: id, agent_type: "general-purpose" }, async () => ({}))
+  }
+
+  const completeTurn = async (f: Fake, event: Record<string, unknown>): Promise<unknown> => {
+    const hook = only(f, "turn.complete") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<unknown>,
+    ) => Promise<unknown>
+    return hook(f.$, event, async (input) => input)
+  }
+
+  const PAY = 65536
+  const big = (n: number): string => "x".repeat(n)
+
+  const rec = (over: Record<string, unknown> = {}): ChildRecord =>
+    ({ handover: "b", summary: "s", agentId: "t", parentSessionId: undefined, closed: true, storedAt: 1, ...over }) as ChildRecord
+
+  const seedLegacy = (fake: Fake, id: string, at: number, pay = PAY): void => {
+    fake.store.set(`child:${id}`, { handover: big(pay), summary: `s ${id}`, agentId: id, closed: true, storedAt: at })
+    fake.store.set(`spawn:${id}`, { agentType: "general-purpose", modelOverride: null, storedAt: at })
+  }
+
+  const seedOriginChain = (fake: Fake, origin: string, members: string[], at: number, pay = PAY): void => {
+    members.forEach((id, i) => {
+      const predecessor = i === 0 ? {} : { predecessorAgentId: members[i - 1] }
+      fake.store.set(`child:${id}`, {
+        handover: big(pay), summary: `s ${id}`, agentId: id, closed: true, storedAt: at + i,
+        originAgentId: origin, ...predecessor, generation: i + 1,
+      })
+      fake.store.set(`spawn:${id}`, {
+        agentType: "general-purpose", modelOverride: null, storedAt: at + i,
+        originAgentId: origin, ...predecessor, generation: i + 1,
+      })
+    })
+    fake.store.set(originalRecordKey(origin), { prompt: `origin task ${origin}`, originAgentId: origin, storedAt: at })
+    fake.store.set(activityKey(origin), { lastActive: at })
+  }
+
+  // Grow the store past the fixed budget with oldest-first timestamped legacy chains.
+  const fillOverBudget = (fake: Fake, prefix: string, extra = 4, pay = PAY): string[] => {
+    const ids: string[] = []
+    let i = 0
+    while (estimateStoreBytes(fake.store) <= STORE_BUDGET_BYTES + extra * (pay + 512)) {
+      const id = `${prefix}${i}`
+      seedLegacy(fake, id, 1000 + i * 10, pay)
+      ids.push(id)
+      i++
+    }
+    return ids
+  }
+
+  const writeHandover = async (fake: Fake, agentId: string, handover = "fresh body"): Promise<CallOutcome> => {
+    if (!fake.agents.some((agent) => agent.id === agentId)) {
+      fake.agents = [...fake.agents, ...childAgents(agentId)]
+    }
+    return toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: `t-${agentId}`, agentId, handover, summary: `s ${agentId}` })
+  }
+
+  it("budgets a fixed 3 MiB complete serialized store including every key family and pending replacement", () => {
+    assert.equal(STORE_BUDGET_BYTES, 3 * 1024 * 1024)
+    const entries = new Map<string, unknown>([
+      ["child:a1", { handover: "body", summary: "s", agentId: "a1", closed: true, storedAt: 7 }],
+      ["spawn:a1", { agentType: "Explore", storedAt: 7 }],
+      [originalRecordKey("a1"), { prompt: "task", originAgentId: "a1", storedAt: 7 }],
+      [activityKey("a1"), { lastActive: 9 }],
+      [pinKey("a1"), { owner: "ses_host", updatedAt: 9 }],
+      ["mystery:key", { anything: [1, "two"] }],
+      ["noprefix", 42],
+    ])
+    const expected = utf8ByteLength(JSON.stringify(Object.fromEntries(entries)))
+    assert.equal(estimateStoreBytes(entries), expected)
+    // Empty store is just the outer braces; pending replaces the old entry value.
+    assert.equal(estimateStoreBytes(new Map()), 2)
+    const replacement = { handover: "replaced body", summary: "s2", agentId: "a1", closed: true, storedAt: 8 }
+    const withPending = new Map(entries)
+    withPending.set("child:a1", replacement)
+    assert.equal(
+      estimateStoreBytes(entries, { key: "child:a1", value: replacement }),
+      utf8ByteLength(JSON.stringify(Object.fromEntries(withPending))),
+    )
+    // Concurrently deleted (undefined) values count as absent.
+    const withAbsent = new Map(entries)
+    withAbsent.set("mystery:key", undefined)
+    const absentExpected = new Map(entries)
+    absentExpected.delete("mystery:key")
+    assert.equal(estimateStoreBytes(withAbsent), utf8ByteLength(JSON.stringify(Object.fromEntries(absentExpected))))
+  })
+
+  it("counts UTF-8 bytes and JSON escapes in keys and values, not string length", () => {
+    assert.equal(utf8ByteLength("😀"), 4)
+    const entries = new Map<string, unknown>([
+      ['child:"quo"téd', { handover: "emoji 😀\nnewline\t\"quote\"\\slash é", summary: "s", agentId: "x", closed: true, storedAt: 1 }],
+      ["spawn:ünï", { agentType: "général", storedAt: 1 }],
+    ])
+    assert.equal(estimateStoreBytes(entries), utf8ByteLength(JSON.stringify(Object.fromEntries(entries))))
+    assert.ok(estimateStoreBytes(entries) > [...entries.keys()].join("").length)
+  })
+
+  it("classifies absent lineage as legacy and every unverifiable claim as uncertain", () => {
+    assert.equal(classifyChain(undefined, undefined).kind, "legacy")
+    assert.equal(classifyChain(rec(), undefined).kind, "legacy")
+    // A generation or predecessor without a resolvable origin is a claim, never legacy.
+    assert.equal(classifyChain(undefined, { generation: 2 }).kind, "uncertain")
+    assert.equal(classifyChain(undefined, { predecessorAgentId: "p" }).kind, "uncertain")
+    assert.equal(classifyChain(rec({ generation: 3 }), undefined).kind, "uncertain")
+    // A named origin is a whole chain.
+    assert.deepEqual(classifyChain(undefined, { originAgentId: "o", generation: 1 }).origin, "o")
+  })
+
+  it("marks malformed, conflicting, and empty lineage uncertain, flagging malformed markers explicitly", () => {
+    // Present-but-invalid values (empty strings, non-integer generations) are malformed, never absent.
+    for (const bad of [
+      { originAgentId: "" },
+      { predecessorAgentId: "" },
+      { generation: 0 },
+      { generation: 1.5 },
+    ]) {
+      assert.equal(classifyChain(undefined, bad as SpawnProvenance).kind, "uncertain")
+    }
+    assert.equal(classifyChain(rec({ originAgentId: "" }), undefined).kind, "uncertain")
+    // Both-present disagreements are conflicts, never guessed.
+    assert.equal(classifyChain(rec({ originAgentId: "o1" }), { originAgentId: "o2" }).kind, "uncertain")
+    assert.equal(classifyChain(
+      rec({ originAgentId: "o", predecessorAgentId: "p1" }),
+      { originAgentId: "o", predecessorAgentId: "p2" },
+    ).kind, "uncertain")
+    assert.equal(classifyChain(
+      rec({ originAgentId: "o", generation: 2 }),
+      { originAgentId: "o", generation: 3 },
+    ).kind, "uncertain")
+    // The explicit malformed-marker flag survives even beside valid fields.
+    assert.equal(classifyChain(undefined, { originAgentId: "o", lineageUncertain: true }).kind, "uncertain")
+    assert.equal(classifyChain(undefined, { lineageUncertain: true }).kind, "uncertain")
+  })
+
+  it("groups whole origin chains with their original/activity keys and quarantines malformed values", () => {
+    const byKey = new Map<string, unknown>()
+    byKey.set("child:m1", { handover: "b", summary: "s", agentId: "m1", closed: true, storedAt: 10, originAgentId: "o", generation: 1 })
+    byKey.set("spawn:m1", { originAgentId: "o", generation: 1, storedAt: 10 })
+    byKey.set("child:m2", { handover: "b", summary: "s", agentId: "m2", closed: true, storedAt: 20, originAgentId: "o", predecessorAgentId: "m1", generation: 2 })
+    byKey.set("spawn:m2", { originAgentId: "o", predecessorAgentId: "m1", generation: 2, storedAt: 20 })
+    byKey.set(originalRecordKey("o"), { prompt: "task", originAgentId: "o", storedAt: 5 })
+    byKey.set(activityKey("o"), { lastActive: 25 })
+    byKey.set("child:bad", { handover: 42 })
+    byKey.set("spawn:bad", { agentType: 42 })
+    byKey.set("mystery:key", { anything: true })
+    const groups = groupChains(byKey)
+    const origin = groups.get("origin:o")
+    assert.ok(origin)
+    assert.deepEqual([...origin.keys].sort(), [activityKey("o"), "child:m1", "child:m2", originalRecordKey("o"), "spawn:m1", "spawn:m2"].sort())
+    assert.equal(origin.lastActive, 25)
+    // Malformed values are quarantined into an uncertain singleton, never attached to the valid chain.
+    const quarantined = groups.get("uncertain:bad")
+    assert.ok(quarantined)
+    assert.ok(quarantined.keys.includes("child:bad"))
+    assert.ok(!origin.keys.includes("child:bad"))
+    // Unknown families ride along in the estimate but form no evictable group.
+    assert.ok(![...groups.values()].some((group) => group.keys.includes("mystery:key")))
+  })
+
+  it("orders oldest whole chains first with legacy before origin and untimestamped oldest", () => {
+    const byKey = new Map<string, unknown>()
+    byKey.set("child:new-origin", { handover: "b", summary: "s", agentId: "new-origin", closed: true, storedAt: 50, originAgentId: "no", generation: 1 })
+    byKey.set("spawn:new-origin", { originAgentId: "no", generation: 1, storedAt: 50 })
+    byKey.set("child:old-origin", { handover: "b", summary: "s", agentId: "old-origin", closed: true, storedAt: 10, originAgentId: "oo", generation: 1 })
+    byKey.set("spawn:old-origin", { originAgentId: "oo", generation: 1, storedAt: 10 })
+    byKey.set("child:fresh-legacy", { handover: "b", summary: "s", agentId: "fresh-legacy", closed: true, storedAt: 100 })
+    byKey.set("child:stale-legacy", { handover: "b", summary: "s", agentId: "stale-legacy", closed: true, storedAt: 1 })
+    byKey.set("child:nostamp", { handover: "b", summary: "s", agentId: "nostamp", closed: true })
+    byKey.set("child:unstamped-origin", { handover: "b", summary: "s", agentId: "unstamped-origin", closed: true, originAgentId: "uo", generation: 1 })
+    byKey.set("spawn:unstamped-origin", { originAgentId: "uo", generation: 1 })
+    byKey.set("child:unc", { handover: "b", summary: "s", agentId: "unc", closed: true, storedAt: 1 })
+    byKey.set("spawn:unc", { lineageUncertain: true, storedAt: 1 })
+    const ordered = orderEvictableChains(groupChains(byKey)).map((group) => group.chain)
+    // Rank 0 is legacy plus untimestamped origins: the untimestamped origin
+    // sorts oldest with legacy (never behind the recent timestamped legacy),
+    // while timestamped origins stay last; uncertain never appears.
+    assert.deepEqual(ordered, ["nostamp", "uo", "stale-legacy", "fresh-legacy", "oo", "no"])
+    // Activity wins over storedAt for recency.
+    byKey.set(activityKey("oo"), { lastActive: 1000 })
+    const reordered = orderEvictableChains(groupChains(byKey)).map((group) => group.chain)
+    assert.deepEqual(reordered, ["nostamp", "uo", "stale-legacy", "fresh-legacy", "no", "oo"])
+  })
+
+  it("ranks untimestamped origins with legacy oldest instead of behind recent legacy", () => {
+    const byKey = new Map<string, unknown>()
+    byKey.set("child:recent-legacy", { handover: "b", summary: "s", agentId: "recent-legacy", closed: true, storedAt: 500 })
+    byKey.set("child:uom", { handover: "b", summary: "s", agentId: "uom", closed: true, originAgentId: "uo", generation: 1 })
+    byKey.set("spawn:uom", { originAgentId: "uo", generation: 1 })
+    byKey.set("child:new-origin-m", { handover: "b", summary: "s", agentId: "new-origin-m", closed: true, storedAt: 900, originAgentId: "no", generation: 1 })
+    byKey.set("spawn:new-origin-m", { originAgentId: "no", generation: 1, storedAt: 900 })
+    const ordered = orderEvictableChains(groupChains(byKey)).map((group) => group.chain)
+    // The untimestamped origin evicts before the recent timestamped legacy;
+    // the timestamped origin sorts last.
+    assert.deepEqual(ordered, ["uo", "recent-legacy", "no"])
+  })
+
+  it("treats spawn-only orphans as legacy singletons and unknown keys as noncandidates", () => {
+    const byKey = new Map<string, unknown>()
+    byKey.set("spawn:orphan", { agentType: "Explore", modelOverride: null, storedAt: 5 })
+    byKey.set("weird", 1)
+    byKey.set("other:thing", { payload: "x" })
+    const groups = groupChains(byKey)
+    const orphan = groups.get("legacy:orphan")
+    assert.ok(orphan)
+    assert.deepEqual(orphan.keys, ["spawn:orphan"])
+    assert.deepEqual(orderEvictableChains(groups).map((group) => group.chain), ["orphan"])
+  })
+
+  it("keeps identifiable related original/activity keys with the member chain", () => {
+    const byKey = new Map<string, unknown>()
+    byKey.set("child:m1", { handover: "b", summary: "s", agentId: "m1", closed: true, storedAt: 10, originAgentId: "o", generation: 1 })
+    byKey.set("spawn:m1", { predecessorAgentId: "ghost", originAgentId: "o", generation: 1, storedAt: 10 })
+    // ghost is named as a predecessor but has no member keys: its orphan
+    // original/activity stays with the member chain, not an independent group.
+    byKey.set(originalRecordKey("ghost"), { prompt: "old task", originAgentId: "ghost", storedAt: 1 })
+    byKey.set(activityKey("ghost"), { lastActive: 2 })
+    const groups = groupChains(byKey)
+    assert.equal(groups.get("legacy:ghost"), undefined)
+    assert.ok(groups.get("origin:o")?.keys.includes(originalRecordKey("ghost")))
+    assert.ok(groups.get("origin:o")?.keys.includes(activityKey("ghost")))
+  })
+
+  it("builds lock-preserving tombstones carrying lineage and timestamps", () => {
+    const tomb = buildChildTombstone({ agentId: "c9", storedAt: 42, predecessorAgentId: "p", originAgentId: "o", generation: 2 })
+    assert.equal(tomb.tombstone, true)
+    assert.equal(tomb.expired, true)
+    assert.equal(tomb.closed, true)
+    assert.equal(tomb.storedAt, 42)
+    assert.equal(tomb.originAgentId, "o")
+    assert.ok(isChildTombstone(tomb))
+    assert.ok(!isChildTombstone({ handover: "b", summary: "s", agentId: "c", closed: true }))
+  })
+
+  it("resolves pending chains from merged store and memory provenance without guessing", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.store.set("child:m1", { handover: "b", summary: "s", agentId: "m1", closed: true, storedAt: 1, originAgentId: "o", generation: 1 })
+    const byKey = new Map(fake.store)
+    assert.equal(await resolveChainOf(fake.$, byKey, "m1", undefined), "o")
+    assert.equal(await resolveChainOf(fake.$, byKey, "solo", undefined), "solo")
+    // A stored predecessor without an origin is uncertain: undefined, never guessed.
+    fake.store.set("spawn:lost", { predecessorAgentId: "ghost", storedAt: 1 })
+    assert.equal(await resolveChainOf(fake.$, new Map(fake.store), "lost", undefined), undefined)
+    // Memory provenance supplements the store for in-flight ids.
+    assert.equal(await resolveChainOf(fake.$, byKey, "fresh", { originAgentId: "o2" }), "o2")
+  })
+
+  it("evicts oldest whole legacy chains first, including spawn-only orphans", async () => {
+    const fake = makeFake()
+    setup(fake)
+    const ids = fillOverBudget(fake, "old")
+    fake.store.set("spawn:orphan", { agentType: "Explore", modelOverride: null, storedAt: 1 })
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    const oldest = ids[0] as string
+    assert.ok(isChildTombstone(fake.store.get(`child:${oldest}`)))
+    assert.equal(fake.store.get(`spawn:${oldest}`), undefined)
+    // The spawn-only orphan sorts oldest (storedAt 1) and is reclaimed too.
+    assert.equal(fake.store.get("spawn:orphan"), undefined)
+    // Newer chains and the writing chain survive with the projection fitting.
+    const newest = ids[ids.length - 1] as string
+    assert.equal((fake.store.get(`child:${newest}`) as ChildRecord).handover, big(PAY))
+    assert.equal((fake.store.get("child:writer") as ChildRecord).summary, "s writer")
+    assert.ok(estimateStoreBytes(fake.store) <= STORE_BUDGET_BYTES)
+    assert.ok(![...fake.store.keys()].some((key) => key === "child:writer" && isChildTombstone(fake.store.get(key))))
+  })
+
+  it("protects the writing, live-listed, inflight, and pinned chains while evicting the oldest unprotected chain", async () => {
+    const fake = makeFake()
+    setup(fake)
+    const ids = fillOverBudget(fake, "p")
+    const liveId = ids[1] as string
+    const pinnedId = ids[2] as string
+    fake.agents = [{ id: liveId, type: "general-purpose", status: "running" }]
+    fake.store.set(pinKey(pinnedId), { owner: "ses_host", updatedAt: Date.now() })
+    const inflightId = ids[3] as string
+    // Inflight chains are protected by contract: reclaim with them held back
+    // evicts around them without touching their keys.
+    const scan = await reclaimForWrite(fake.$, "child:newcomer", { probe: true }, new Set([inflightId, liveId, pinnedId]))
+    assert.ok(!scan.evicted.some((key) => key === `child:${inflightId}` || key === `spawn:${inflightId}`))
+    assert.ok(!scan.tombstoned.includes(inflightId))
+    assert.ok(fake.store.get(`child:${inflightId}`))
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    // Oldest unprotected chain went; live, pinned, inflight, and writer chains remain.
+    assert.ok(isChildTombstone(fake.store.get(`child:${ids[0]}`)))
+    assert.equal((fake.store.get(`child:${liveId}`) as ChildRecord).handover, big(PAY))
+    assert.equal((fake.store.get(`child:${pinnedId}`) as ChildRecord).handover, big(PAY))
+    assert.equal((fake.store.get(`child:${inflightId}`) as ChildRecord).handover, big(PAY))
+    assert.ok(fake.store.get("child:writer"))
+  })
+
+  it("protects uncertain members and the predecessor/origin chains they reference", async () => {
+    const fake = makeFake()
+    setup(fake)
+    seedOriginChain(fake, "O", ["om1", "om2"], 1000)
+    // Uncertain successor observing om2 as predecessor: explicit unresolvable lineage.
+    fake.store.set("spawn:u1", { predecessorAgentId: "om2", lineageUncertain: true, storedAt: 5000 })
+    fake.store.set("child:u1", { handover: "b", summary: "s", agentId: "u1", closed: true, storedAt: 5000 })
+    const ids = fillOverBudget(fake, "q")
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    // Uncertain singleton and the referenced origin chain survive; unrelated legacy was evicted.
+    assert.equal((fake.store.get("child:u1") as ChildRecord).handover, "b")
+    assert.equal((fake.store.get("child:om1") as ChildRecord).originAgentId, "O")
+    assert.equal((fake.store.get("child:om2") as ChildRecord).handover, big(PAY))
+    assert.ok(fake.store.get(originalRecordKey("O")))
+    assert.ok(isChildTombstone(fake.store.get(`child:${ids[0]}`)))
+  })
+
+  it("protects chains named by guard-invalid records and mismatched identities", async () => {
+    const fake = makeFake()
+    setup(fake)
+    seedOriginChain(fake, "O", ["om1", "om2"], 1000)
+    // Guard-invalid child (missing summary) naming the victim origin and predecessor.
+    fake.store.set("child:bad", { handover: "b", agentId: "bad", closed: true, storedAt: 5000, originAgentId: "O", predecessorAgentId: "om1" })
+    // Guard-invalid spawn (non-string agentType) naming the victim origin and predecessor.
+    fake.store.set("spawn:raw", { agentType: 42, originAgentId: "O", predecessorAgentId: "om2" })
+    // Guard-invalid child naming an orphan predecessor carrying original/activity.
+    fake.store.set("child:bad2", { handover: "b", agentId: "bad2", closed: true, storedAt: 5000, predecessorAgentId: "ghost" })
+    fake.store.set(originalRecordKey("ghost"), { prompt: "ghost task", originAgentId: "ghost", storedAt: 1 })
+    fake.store.set(activityKey("ghost"), { lastActive: 2 })
+    // Conflicting recorded identity: key mux claims member om1.
+    fake.store.set("child:mux", { handover: "b", summary: "s", agentId: "om1", closed: true, storedAt: 5000 })
+    fake.store.set("mystery:kept", { payload: "x" })
+    // Grouping first: malformed values quarantine as uncertain singletons and
+    // never join the victim chain; the ghost orphans ride with their
+    // quarantined referrer instead of forming an independent legacy group.
+    const groups = groupChains(new Map(fake.store))
+    assert.ok(groups.get("uncertain:bad"))
+    assert.ok(groups.get("uncertain:raw"))
+    assert.ok(groups.get("uncertain:mux"))
+    assert.ok(groups.get("uncertain:bad2")?.keys.includes(originalRecordKey("ghost")))
+    assert.ok(groups.get("uncertain:bad2")?.keys.includes(activityKey("ghost")))
+    assert.equal(groups.get("legacy:ghost"), undefined)
+    assert.ok(!groups.get("origin:O")?.keys.includes("child:bad"))
+    const ids = fillOverBudget(fake, "h")
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    // Victim chain, orphans, quarantined records, and opaque keys survive; unrelated legacy was evicted.
+    assert.equal((fake.store.get("child:om1") as ChildRecord).handover, big(PAY))
+    assert.equal((fake.store.get("child:om2") as ChildRecord).handover, big(PAY))
+    assert.ok(fake.store.get(originalRecordKey("O")))
+    assert.ok(fake.store.get(originalRecordKey("ghost")))
+    assert.ok(fake.store.get(activityKey("ghost")))
+    assert.ok(fake.store.get("child:bad"))
+    assert.ok(fake.store.get("spawn:raw"))
+    assert.ok(fake.store.get("child:mux"))
+    assert.equal((fake.store.get("mystery:kept") as { payload: string }).payload, "x")
+    assert.ok(isChildTombstone(fake.store.get(`child:${ids[0]}`)))
+  })
+
+  it("treats conflicting valid child/spawn origins as uncertain and shields both chains", async () => {
+    const fake = makeFake()
+    setup(fake)
+    seedOriginChain(fake, "O1", ["a1", "a2"], 1000)
+    seedOriginChain(fake, "O2", ["b1"], 2000)
+    // Each record alone classifies as an origin; merged they conflict, so the
+    // id is uncertain and both referenced chains are shielded.
+    fake.store.set("child:c1", { handover: "b", summary: "s", agentId: "c1", closed: true, storedAt: 5000, originAgentId: "O1", generation: 2 })
+    fake.store.set("spawn:c1", { agentType: "general-purpose", modelOverride: null, storedAt: 5000, originAgentId: "O2", generation: 2 })
+    const groups = groupChains(new Map(fake.store))
+    assert.ok(groups.get("uncertain:c1"))
+    assert.ok(!groups.get("origin:O1")?.keys.includes("child:c1"))
+    assert.ok(!groups.get("origin:O2")?.keys.includes("spawn:c1"))
+    const ids = fillOverBudget(fake, "cx")
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    assert.equal((fake.store.get("child:a1") as ChildRecord).originAgentId, "O1")
+    assert.equal((fake.store.get("child:b1") as ChildRecord).originAgentId, "O2")
+    assert.ok(fake.store.get(originalRecordKey("O1")))
+    assert.ok(fake.store.get(originalRecordKey("O2")))
+    assert.ok(fake.store.get("child:c1"))
+    assert.ok(fake.store.get("spawn:c1"))
+    assert.ok(isChildTombstone(fake.store.get(`child:${ids[0]}`)))
+  })
+
+  it("never evicts unknown or other key families", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fillOverBudget(fake, "k")
+    fake.store.set("mystery:kept", { payload: big(1024) })
+    fake.store.set("barekey", "kept-value")
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    assert.deepEqual((fake.store.get("mystery:kept") as { payload: string }).payload, big(1024))
+    assert.equal(fake.store.get("barekey"), "kept-value")
+  })
+
+  it("keeps retained tombstones locked with explicit expired reads and denials", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.store.set("child:x1", buildChildTombstone({ agentId: "x1", storedAt: 5, originAgentId: "O" }))
+    fake.agents = childAgents("x1")
+    const read = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "x1" })
+    assert.match(String(read.result), /has expired and is no longer stored/)
+    assert.match(String(read.result), /must not be messaged or resumed/)
+    // Gate, duplicate handover, and stop all refuse with expiry wording; nothing is resurrected.
+    assert.match(String((await toolCall(fake, { tool: "Bash", tool_use_id: "t1", agentId: "x1" })).deny), /expired under size-based retention/)
+    assert.match(String((await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "x1", handover: "b", summary: "s" })).deny), /expired under size-based retention/)
+    const stopped = await stopHook(fake, { agent_id: "x1", stop_hook_active: false, last_assistant_message: "other" })
+    assert.match(String(stopped.block), /SubagentHandback/)
+    assert.ok(isChildTombstone(fake.store.get("child:x1")))
+    // Handback forwards the locked reply through next without persisting delivery status onto the tombstone.
+    const forwarded = await toolCall(fake, { tool: "SubagentHandback", agentId: "x1", message: "report" }, async (input) => ({ result: `native:${String((input as Record<string, unknown>).message).slice(0, 20)}` }))
+    assert.match(String(forwarded.result), /^native:/)
+    const after = fake.store.get("child:x1") as ChildTombstone
+    assert.ok(isChildTombstone(after))
+    assert.equal((after as unknown as Record<string, unknown>).handbackDelivered, undefined)
+    // Continuations still get the intro but never rebuild a payload.
+    await startChild(fake, "x1")
+    assert.ok(isChildTombstone(fake.store.get("child:x1")))
+  })
+
+  it("tombstones retain merged spawn lineage and the pre-eviction timestamp", async () => {
+    const fake = makeFake()
+    setup(fake)
+    // Child without lineage plus spawn with origin: the tombstone merges the spawn link.
+    fake.store.set("child:merge", { handover: big(3 * 1024 * 1024 + 65536), summary: "s", agentId: "merge", closed: true, storedAt: 100 })
+    fake.store.set("spawn:merge", { originAgentId: "O9", generation: 5, storedAt: 100 })
+    // Small newer filler evicts first but frees almost nothing, so reclamation
+    // reaches the big older origin chain.
+    for (let i = 0; i < 5; i++) seedLegacy(fake, `mf${i}`, 5000 + i, 1024)
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    const tomb = fake.store.get("child:merge") as ChildTombstone
+    assert.ok(isChildTombstone(tomb))
+    assert.equal(tomb.originAgentId, "O9")
+    assert.equal(tomb.generation, 5)
+    // Evicting does not refresh the chain age: the original member timestamp is kept.
+    assert.equal(tomb.storedAt, 100)
+  })
+
+  it("lets successors of expired predecessors inherit lineage without resurrecting payload or resetting the origin", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.store.set("child:gone", buildChildTombstone({ agentId: "gone", storedAt: 5, originAgentId: "O", generation: 1 }))
+    fake.agents = [{ id: "next", type: "general-purpose", status: "running" }]
+    const result = await spawn(fake, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("gone")} keep going` }, { model: "m", agentId: "next" })
+    assert.equal((result as Record<string, unknown>).agentId, "next")
+    const meta = fake.store.get("spawn:next") as SpawnProvenance
+    assert.equal(meta.predecessorAgentId, "gone")
+    assert.equal(meta.originAgentId, "O")
+    assert.equal(meta.generation, 2)
+    // The expired predecessor is untouched and no new origin was fabricated for it.
+    assert.ok(isChildTombstone(fake.store.get("child:gone")))
+    assert.equal(fake.store.get(originalRecordKey("gone")), undefined)
+  })
+
+  it("refreshes activity on reads and continuations without a keys() eviction scan", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("a1")
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "a1", handover: "body", summary: "s" })
+    let keysCalls = 0
+    const innerKeys = fake.$.store.keys.bind(fake.$.store)
+    ;(fake.$.store as unknown as { keys: () => Promise<string[]> }).keys = async () => {
+      keysCalls++
+      return innerKeys()
+    }
+    await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "a1" })
+    await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "a1", full: true })
+    await startChild(fake, "a1")
+    await runStep(fake, { agentId: "a1", turnId: "t1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await completeTurn(fake, { agentId: "a1", turnId: "t1" })
+    assert.equal(keysCalls, 0)
+    // Activity was still touched (chain stays young) without any scan.
+    assert.ok(fake.store.get(activityKey("a1")))
+    assert.equal((fake.store.get("child:a1") as ChildRecord).handover, "body")
+  })
+
+  it("refuses the write when key enumeration is missing, even apparently under budget, then retries clean", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("w1")
+    fake.keysFails = true
+    const denied = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "w1", handover: "b", summary: "s" })
+    assert.match(String(denied.deny), /storage budget refuses the write/)
+    assert.match(String(denied.deny), /store scan incomplete \(key enumeration unavailable\)/)
+    assert.match(String(denied.deny), /nothing was stored and the child is not locked/)
+    assert.equal(fake.store.get("child:w1"), undefined)
+    // No lock was taken: ordinary tools still pass through.
+    assert.match(String((await toolCall(fake, { tool: "Bash", tool_use_id: "t2", agentId: "w1" })).result), /^passed:Bash$/)
+    fake.keysFails = false
+    const retried = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t3", agentId: "w1", handover: "b", summary: "s" })
+    assert.match(String(retried.result), /Handover stored/)
+  })
+
+  it("refuses the write on any unreadable key, even apparently under budget, then retries clean", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.store.set("child:other", { handover: "kept", summary: "s", agentId: "other", closed: true, storedAt: 1 })
+    fake.agents = childAgents("w1")
+    fake.readFailKeys.add("child:other")
+    const denied = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "w1", handover: "b", summary: "s" })
+    assert.match(String(denied.deny), /store scan incomplete \(1 unreadable keys, first: child:other\)/)
+    assert.match(String(denied.deny), /nothing was stored and the child is not locked/)
+    assert.equal(fake.store.get("child:w1"), undefined)
+    fake.readFailKeys.delete("child:other")
+    const retried = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t3", agentId: "w1", handover: "b", summary: "s" })
+    assert.match(String(retried.result), /Handover stored/)
+    assert.equal((fake.store.get("child:other") as ChildRecord).handover, "kept")
+  })
+
+  it("keeps a chain whole when its tombstone write fails and reports an explicit retryable error", async () => {
+    const fake = makeFake()
+    setup(fake)
+    const ids = fillOverBudget(fake, "f", 4)
+    const oldest = ids[0] as string
+    fake.store.set(originalRecordKey(oldest), { prompt: `origin task ${oldest}`, originAgentId: oldest, storedAt: 1 })
+    fake.agents = childAgents("writer")
+    fake.writeFailKeys.add(`child:${oldest}`)
+    const denied = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "writer", handover: "fresh", summary: "s" })
+    assert.match(String(denied.deny), /storage budget refuses the write/)
+    assert.match(String(denied.deny), /tombstone child:/)
+    assert.match(String(denied.deny), /retry the same call/)
+    assert.match(String(denied.deny), /nothing was stored and the child is not locked/)
+    // The sibling spawn/original keys were not deleted behind the failed tombstone.
+    assert.equal((fake.store.get(`child:${oldest}`) as ChildRecord).handover, big(PAY))
+    assert.ok(fake.store.get(`spawn:${oldest}`))
+    assert.ok(fake.store.get(originalRecordKey(oldest)))
+    assert.equal(fake.store.get("child:writer"), undefined)
+    fake.writeFailKeys.delete(`child:${oldest}`)
+    // Force reclamation on retry with fresh over-budget filler: the oldest
+    // chain is tombstoned first now that its lock write succeeds.
+    fake.store.set("child:bigfill", { handover: big(500000), summary: "s", agentId: "bigfill", closed: true, storedAt: 99999 })
+    fake.store.set("spawn:bigfill", { agentType: "general-purpose", modelOverride: null, storedAt: 99999 })
+    const retried = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "writer", handover: "fresh", summary: "s" })
+    assert.match(String(retried.result), /Handover stored/)
+    assert.ok(isChildTombstone(fake.store.get(`child:${oldest}`)))
+  })
+
+  it("reports partial delete failures explicitly even when the projection fits, then completes on retry", async () => {
+    const fake = makeFake()
+    setup(fake)
+    const ids = fillOverBudget(fake, "d", 1)
+    const oldest = ids[0] as string
+    fake.agents = childAgents("writer")
+    fake.deleteFailKeys.add(`spawn:${oldest}`)
+    const denied = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "writer", handover: "fresh", summary: "s" })
+    assert.match(String(denied.deny), /storage budget refuses the write/)
+    assert.match(String(denied.deny), /delete spawn:/)
+    assert.match(String(denied.deny), /retry the same call/)
+    // The payload lock was still preserved as a tombstone; the failed delete was retained.
+    assert.ok(isChildTombstone(fake.store.get(`child:${oldest}`)))
+    assert.ok(fake.store.get(`spawn:${oldest}`))
+    assert.equal(fake.store.get("child:writer"), undefined)
+    fake.deleteFailKeys.delete(`spawn:${oldest}`)
+    // Force reclamation on retry: the oldest chain is visited first and its
+    // retained delete completes.
+    fake.store.set("child:bigfill", { handover: big(500000), summary: "s", agentId: "bigfill", closed: true, storedAt: 99999 })
+    fake.store.set("spawn:bigfill", { agentType: "general-purpose", modelOverride: null, storedAt: 99999 })
+    const retried = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "writer", handover: "fresh", summary: "s" })
+    assert.match(String(retried.result), /Handover stored/)
+    assert.equal(fake.store.get(`spawn:${oldest}`), undefined)
+  })
+
+  it("stores the canonical summary losslessly beside delimiter text and keeps legacy short replies deliverable", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("a1")
+    const tricky = `${CHILD_SUMMARY_PREFIX} tricky\nUser decisions pending: none\nContext handover (incomplete): embedded marker-like text`
+    const done = await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "a1", handover: "body", summary: tricky })
+    assert.ok(done.result)
+    const stored = fake.store.get("child:a1") as ChildRecord
+    assert.equal(stored.summary, tricky)
+    assert.equal(stored.shortReply, undefined)
+    // Derivation never parses the summary out of generated text: the full text survives verbatim.
+    assert.ok(shortReplyOf(stored).includes(tricky))
+    assert.match(String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "a1" })).result), /User decisions pending: none/)
+    // The successor payload carries the handover verbatim once; the summary
+    // travels via the derived short reply, never rewritten.
+    const full = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "a1", full: true })).result)
+    assert.equal(full.split("body").length - 1, 1)
+    // Legacy stored short replies are returned verbatim by derivation and
+    // forwarded as-is on the native handback path for the matching turn.
+    const legacy = makeFake()
+    setup(legacy)
+    legacy.store.set("child:old", { handover: "old body", summary: "old summary", agentId: "old", shortReply: "Context handover (incomplete): old short", closed: true, storedAt: 1 })
+    assert.equal(shortReplyOf(legacy.store.get("child:old") as ChildRecord), "Context handover (incomplete): old short")
+    legacy.store.set("child:old2", { handover: "old body", summary: "old summary", agentId: "old2", shortReply: "Context handover (incomplete): old short", closed: true, storedAt: 1, handoverTurnId: "t" })
+    legacy.agents = childAgents("old2")
+    await runStep(legacy, { agentId: "old2", turnId: "t" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    const seen: unknown[] = []
+    await toolCall(legacy, { tool: "SubagentHandback", agentId: "old2", message: "report" }, async (input) => {
+      seen.push((input as Record<string, unknown>).message)
+      return { result: "native-ok" }
+    })
+    assert.deepEqual(seen, ["Context handover (incomplete): old short"])
+    assert.match(String((await toolCall(legacy, { tool: READ_FULL, tool_use_id: "r2", childId: "old", full: true })).result), /old body/)
+  })
+
+  it("releases owned pins and transient state on the matched turn.complete while mismatched turns preserve them", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("w1")
+    await spawn(fake, { subagentType: "Explore" }, { model: "m", agentId: "w1" })
+    assert.ok(fake.store.get(pinKey("w1")))
+    await runStep(fake, { agentId: "w1", turnId: "t1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    // Mismatched turn identity leaves the live newer-turn state alone.
+    await completeTurn(fake, { agentId: "w1", turnId: "other" })
+    assert.ok(fake.store.get(pinKey("w1")))
+    await completeTurn(fake, { agentId: "w1", turnId: "t1" })
+    assert.equal(fake.store.get(pinKey("w1")), undefined)
+    // Correction state retired with the turn: a later stop corrects fresh.
+    await handOver(fake, "w1", "body")
+    const event = { agent_id: "w1", stop_hook_active: false, last_assistant_message: "other" }
+    assert.match(String((await stopHook(fake, event)).block), /ONLY/)
+    assert.equal((await stopHook(fake, event)).block, undefined)
+    await completeTurn(fake, { agentId: "w1" })
+    assert.match(String((await stopHook(fake, event)).block), /ONLY/)
+  })
+
+  it("retires measurements on a matching turn.complete and re-enables them on a new open turn", async () => {
+    const fake = makeFake({ soft: 1000 })
+    setup(fake)
+    const nudges = async (): Promise<number> =>
+      ((await batch(fake, { agent_id: "w1" })).additionalContext as unknown[] | undefined)?.length ?? 0
+    fake.agents = childAgents("w1")
+    await spawn(fake, { subagentType: "Explore" }, { model: "m", agentId: "w1" })
+    await startChild(fake, "w1")
+    await runStep(fake, { agentId: "w1", turnId: "t1" }, { input_tokens: 900, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    // Over soft before completion: the batch nudges.
+    assert.equal(await nudges(), 1)
+    await completeTurn(fake, { agentId: "w1", turnId: "t1" })
+    // Completion of the unhanded-over child cleared the measurement: no nudge without fresh steps.
+    assert.deepEqual((await batch(fake, { agent_id: "w1" })).additionalContext ?? [], [])
+    assert.equal(fake.store.get(pinKey("w1")), undefined)
+    // A genuinely new open turn re-enables measurement with the pin present
+    // inside next (before the first resumed request runs in-flight).
+    let pinInsideNext: unknown = "unset"
+    const hook = only(fake, "turn.step") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => AsyncGenerator<unknown, StepResult, StepResult | undefined>,
+    ) => AsyncGenerator<unknown, StepResult, StepResult | undefined>
+    async function* probingNext(): AsyncGenerator<unknown, StepResult, StepResult | undefined> {
+      pinInsideNext = fake.store.get(pinKey("w1"))
+      yield { kind: "text", text: "chunk" }
+      return { usage: { input_tokens: 1100, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" } }
+    }
+    const stream = hook(fake.$, { agentId: "w1", turnId: "t2" }, probingNext as never)
+    for (;;) {
+      const item = await stream.next()
+      if (item.done === true) break
+    }
+    assert.ok(isChainPin(pinInsideNext))
+    assert.ok(fake.store.get(pinKey("w1")))
+    assert.equal(await nudges(), 1)
+    // A late completion for the superseded turn preserves the fresh pin and state.
+    await completeTurn(fake, { agentId: "w1", turnId: "t1" })
+    assert.ok(fake.store.get(pinKey("w1")))
+    assert.equal(await nudges(), 1)
+    // A late step from the superseded turn changes nothing either.
+    await runStep(fake, { agentId: "w1", turnId: "t1" }, { input_tokens: 9999, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    assert.equal(await nudges(), 1)
+    // Handover after retirement reports honest unknown diagnostics: no fabricated baseline.
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "w1", handover: "body", summary: "s" })
+    assert.match(String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "w1", full: true })).result), /Baseline: start-context-tokens=unknown, last-batch-increase=unknown\./)
+  })
+
+  it("keeps the once-per-turn stop latch across blocked stops and refreshes it on resume", async () => {
+    const fake = makeFake()
+    setup(fake)
+    await handOver(fake, "m1", "body")
+    const event = { agent_id: "m1", stop_hook_active: false, last_assistant_message: "other" }
+    // A blocked terminal stop returns the base untouched without consuming the latch.
+    assert.deepEqual(await stopHook(fake, event, async () => ({ block: "other hook" })), { block: "other hook" })
+    assert.match(String((await stopHook(fake, event)).block), /ONLY/)
+    assert.equal((await stopHook(fake, event)).block, undefined)
+    // A resumed turn receives a fresh correction.
+    await runStep(fake, { agentId: "m1", turnId: "resumed" }, null)
+    assert.match(String((await stopHook(fake, event)).block), /ONLY/)
+  })
+
+  it("ignores late and superseded step callbacks without resurrecting measurements", async () => {
+    const fake = makeFake({ soft: 1000 })
+    setup(fake)
+    fake.agents = childAgents("s1")
+    const hook = only(fake, "classic.SubagentStart") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    await hook(fake.$, { agent_id: "s1", agent_type: "general-purpose" }, async () => ({}))
+    await runStep(fake, { agentId: "s1", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(fake, { agentId: "s1", turnId: "t2" }, { input_tokens: 520, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    // Late callback from the superseded turn must not rewrite the growth delta.
+    await runStep(fake, { agentId: "s1", turnId: "t1" }, { input_tokens: 9999, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "s1", handover: "body", summary: "s" })
+    assert.match(String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "s1", full: true })).result), /Baseline: start-context-tokens=400, last-batch-increase=120\./)
+  })
+
+  it("reclaims completed, failed, and killed listings while unknown and running listings protect", async () => {
+    const fake = makeFake()
+    setup(fake)
+    seedLegacy(fake, "done", 100, PAY)
+    seedLegacy(fake, "broke", 200, PAY)
+    seedLegacy(fake, "dead", 300, PAY)
+    seedLegacy(fake, "guarded", 400, PAY)
+    seedLegacy(fake, "weird", 500, PAY)
+    fillOverBudget(fake, "z", 4)
+    fake.agents = [
+      { id: "done", type: "general-purpose", status: "completed" },
+      { id: "broke", type: "general-purpose", status: "failed" },
+      { id: "dead", type: "general-purpose", status: "killed" },
+      { id: "guarded", type: "general-purpose", status: "running" },
+      { id: "weird", type: "general-purpose", status: "mystery-status" },
+    ]
+    const done = await writeHandover(fake, "writer")
+    assert.ok(done.result)
+    assert.ok(isChildTombstone(fake.store.get("child:done")))
+    assert.ok(isChildTombstone(fake.store.get("child:broke")))
+    assert.ok(isChildTombstone(fake.store.get("child:dead")))
+    assert.equal((fake.store.get("child:guarded") as ChildRecord).handover, big(PAY))
+    assert.equal((fake.store.get("child:weird") as ChildRecord).handover, big(PAY))
+  })
+
+  it("holds refcounted reservations across overlapping same-predecessor spawns until all settle", async () => {
+    const fake = makeFake()
+    setup(fake)
+    // Origin predecessor so the successors resolve to real origin members
+    // (a successor of a legacy origin-less record would stay uncertain and
+    // protect its refs indefinitely, which the uncertain test covers).
+    seedOriginChain(fake, "P", ["pred"], 100, PAY)
+    // One over-budget filler per step: each write has exactly one eligible
+    // victim besides the reserved predecessor chain, so eviction order is exact.
+    const addFiller = (id: string): void => {
+      fake.store.set(`child:${id}`, { handover: big(3 * 1024 * 1024 + 65536), summary: "s", agentId: id, closed: true, storedAt: 9000 })
+      fake.store.set(`spawn:${id}`, { agentType: "general-purpose", modelOverride: null, storedAt: 9000 })
+    }
+    const hook = only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    // Two overlapping spawns from the same predecessor: protection starts
+    // before next and each holds its own reservation while pending.
+    let releaseFirst!: (value: Record<string, unknown>) => void
+    let releaseSecond!: (value: Record<string, unknown>) => void
+    const first = hook(fake.$, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("pred")} one` }, async () => new Promise((resolve) => { releaseFirst = resolve as never }))
+    const second = hook(fake.$, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("pred")} two` }, async () => new Promise((resolve) => { releaseSecond = resolve as never }))
+    // A concurrent write while both are pending cannot evict the predecessor chain.
+    addFiller("fill1")
+    assert.ok((await writeHandover(fake, "w1")).result)
+    assert.ok(isChildTombstone(fake.store.get("child:fill1")))
+    assert.equal((fake.store.get("child:pred") as ChildRecord).handover, big(PAY))
+    // Settling the first spawn must not release protection while the second is still pending.
+    releaseFirst({ model: "m", agentId: "s1" })
+    assert.equal(((await first) as Record<string, unknown>).agentId, "s1")
+    addFiller("fill2")
+    assert.ok((await writeHandover(fake, "w2")).result)
+    assert.ok(isChildTombstone(fake.store.get("child:fill2")))
+    assert.equal((fake.store.get("child:pred") as ChildRecord).handover, big(PAY))
+    // Once all settle, the predecessor chain is reclaimable again: oldest first.
+    releaseSecond({ model: "m", agentId: "s2" })
+    assert.equal(((await second) as Record<string, unknown>).agentId, "s2")
+    // Retire the successors' active pins via turn completion (a real
+    // lifecycle release; live pins would otherwise keep protecting the chain).
+    await completeTurn(fake, { agentId: "s1" })
+    await completeTurn(fake, { agentId: "s2" })
+    assert.equal(fake.store.get(pinKey("s1")), undefined)
+    assert.equal(fake.store.get(pinKey("s2")), undefined)
+    // Push just over budget with a live-listed filler (protected itself), so
+    // the released predecessor chain is the only reclaimable candidate.
+    // Sized so evicting P (~66KB) fits but nothing else must go.
+    fake.store.set("child:fill4", { handover: big(3108000), summary: "s", agentId: "fill4", closed: true, storedAt: 9500 })
+    fake.store.set("spawn:fill4", { agentType: "general-purpose", modelOverride: null, storedAt: 9500 })
+    fake.agents = [...fake.agents, ...childAgents("fill4")]
+    assert.ok((await writeHandover(fake, "w4")).result)
+    assert.ok(isChildTombstone(fake.store.get("child:pred")))
+    assert.equal((fake.store.get("child:fill4") as ChildRecord).handover.length, 3108000)
+  })
+
+  it("releases its reservation when next rejects without masking the original failure", async () => {
+    const fake = makeFake()
+    setup(fake)
+    seedOriginChain(fake, "P", ["pred"], 100, PAY)
+    const hook = only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    const failure = new Error("native spawn blew up")
+    // Overlapping second same-predecessor spawn stays pending while the first rejects.
+    let releaseSecond!: (value: Record<string, unknown>) => void
+    const second = hook(fake.$, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("pred")} two` }, async () => new Promise((resolve) => { releaseSecond = resolve as never }))
+    // The original rejection propagates unchanged (never a ReferenceError),
+    // and the failed spawn's reservation is released exactly once.
+    let seen: unknown = "unset"
+    try {
+      await hook(fake.$, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("pred")} one` }, async () => { throw failure })
+      assert.fail("rejecting next must propagate")
+    } catch (error) {
+      seen = error
+    }
+    assert.equal(seen, failure)
+    // The first exception must not drop the overlapping second reservation: a
+    // concurrent write while it is pending still cannot evict the predecessor chain.
+    const addFiller = (id: string): void => {
+      fake.store.set(`child:${id}`, { handover: big(3 * 1024 * 1024 + 65536), summary: "s", agentId: id, closed: true, storedAt: 9000 })
+      fake.store.set(`spawn:${id}`, { agentType: "general-purpose", modelOverride: null, storedAt: 9000 })
+    }
+    addFiller("fill1")
+    assert.ok((await writeHandover(fake, "w1")).result)
+    assert.ok(isChildTombstone(fake.store.get("child:fill1")))
+    assert.equal((fake.store.get("child:pred") as ChildRecord).handover, big(PAY))
+    // Once the remaining reservation settles, quota can reclaim the
+    // predecessor chain again: retire its pin, then push just over budget
+    // with a live-listed filler so the released chain is the only candidate.
+    // A leaked reservation would keep it protected and deny the write.
+    releaseSecond({ model: "m", agentId: "s2" })
+    assert.equal(((await second) as Record<string, unknown>).agentId, "s2")
+    await completeTurn(fake, { agentId: "s2" })
+    assert.equal(fake.store.get(pinKey("s2")), undefined)
+    fake.store.set("child:fill4", { handover: big(3108000), summary: "s", agentId: "fill4", closed: true, storedAt: 9500 })
+    fake.store.set("spawn:fill4", { agentType: "general-purpose", modelOverride: null, storedAt: 9500 })
+    fake.agents = [...fake.agents, ...childAgents("fill4")]
+    assert.ok((await writeHandover(fake, "w4")).result)
+    assert.ok(isChildTombstone(fake.store.get("child:pred")))
+    assert.equal((fake.store.get("child:fill4") as ChildRecord).handover.length, 3108000)
   })
 })

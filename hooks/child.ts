@@ -174,6 +174,18 @@ export interface SpawnProvenance {
   readonly generation?: number
   /** Bounded original-capture failure text persisted when the original write is rejected. Memory first, store fallback. */
   readonly originalCaptureError?: string
+  /**
+   * Freshness timestamp for spawn-only chains (Date.now() at persist time).
+   * Lets orphan spawn metadata sort by recency; records without it (legacy)
+   * still sort oldest. Never a lineage claim.
+   */
+  readonly storedAt?: number
+  /**
+   * Observed unresolvable lineage (malformed successor marker): the chain is
+   * uncertain and never evicted. Absent means no such observation; only an
+   * explicit true counts, never a default.
+   */
+  readonly lineageUncertain?: boolean
 }
 
 export function isSpawnProvenance(value: unknown): value is SpawnProvenance {
@@ -185,6 +197,8 @@ export function isSpawnProvenance(value: unknown): value is SpawnProvenance {
   if (record.originAgentId !== undefined && typeof record.originAgentId !== "string") return false
   if (record.generation !== undefined && (typeof record.generation !== "number" || !Number.isInteger(record.generation) || record.generation < 1)) return false
   if (record.originalCaptureError !== undefined && typeof record.originalCaptureError !== "string") return false
+  if (record.storedAt !== undefined && (typeof record.storedAt !== "number" || !Number.isFinite(record.storedAt))) return false
+  if (record.lineageUncertain !== undefined && typeof record.lineageUncertain !== "boolean") return false
   return true
 }
 
@@ -281,10 +295,20 @@ export function buildProvenanceReadback(provenance?: SpawnProvenance): string {
 
 export interface ChildRecord {
   readonly handover: string
+  /**
+   * Model-authored summary (canonical, lossless). Always persisted in new
+   * records; the delivered short reply is derived from it and not stored.
+   * Legacy records may carry a persisted shortReply fallback instead.
+   */
   readonly summary: string
   readonly agentId: string
   readonly parentSessionId: string | undefined
-  readonly shortReply: string
+  /**
+   * Delivered short reply. Present in legacy records; omitted in new records
+   * (derived via shortReplyOf). Never delimiter-parsed: user/model summary
+   * text may itself contain the prefix delimiter.
+   */
+  readonly shortReply?: string
   readonly closed: true
   readonly storedAt: number
   /** Native SubagentHandback delivery observed: true delivered, false stored without delivery, absent unknown (legacy/reload). */
@@ -314,13 +338,450 @@ export interface ChildDiag extends HandoverDiag {
 export function isChildRecord(value: unknown): value is ChildRecord {
   if (typeof value !== "object" || value === null) return false
   const record = value as Record<string, unknown>
+  if (typeof record.tombstone === "boolean" && record.tombstone === true) return false
   return (
     typeof record.handover === "string" &&
     typeof record.summary === "string" &&
     typeof record.agentId === "string" &&
-    typeof record.shortReply === "string" &&
+    (record.shortReply === undefined || typeof record.shortReply === "string") &&
     record.closed === true
   )
+}
+
+/**
+ * Delivered short reply for a record: the persisted legacy reply when
+ * present, else derived losslessly from the canonical summary. Derivation
+ * never parses the summary out of generated text.
+ */
+export function shortReplyOf(
+  record: Pick<ChildRecord, "summary" | "shortReply" | "agentId">,
+  provenance?: SpawnProvenance,
+): string {
+  if (typeof record.shortReply === "string") return record.shortReply
+  return buildChildShortReply(record.summary || "Handover stored.", record.agentId, provenance)
+}
+
+/**
+ * Compact closure tombstone left when size retention evicts a handed-over
+ * child. Preserves the lock (closed:true) and minimal lineage; the payload
+ * (handover/summary/shortReply) is gone. Reads report expired; expired ids
+ * never seed a fabricated new origin.
+ */
+export interface ChildTombstone {
+  readonly tombstone: true
+  readonly expired: true
+  readonly agentId: string
+  readonly closed: true
+  readonly storedAt: number
+  readonly predecessorAgentId?: string
+  readonly originAgentId?: string
+  readonly generation?: number
+}
+
+export function isChildTombstone(value: unknown): value is ChildTombstone {
+  if (typeof value !== "object" || value === null) return false
+  const record = value as Record<string, unknown>
+  return (
+    record.tombstone === true &&
+    record.expired === true &&
+    typeof record.agentId === "string" &&
+    record.closed === true
+  )
+}
+
+export function buildChildTombstone(args: {
+  readonly agentId: string
+  readonly storedAt?: number
+  readonly predecessorAgentId?: string
+  readonly originAgentId?: string
+  readonly generation?: number
+}): ChildTombstone {
+  return {
+    tombstone: true,
+    expired: true,
+    agentId: args.agentId,
+    closed: true,
+    storedAt: args.storedAt ?? Date.now(),
+    ...(args.predecessorAgentId === undefined ? {} : { predecessorAgentId: args.predecessorAgentId }),
+    ...(args.originAgentId === undefined ? {} : { originAgentId: args.originAgentId }),
+    ...(args.generation === undefined ? {} : { generation: args.generation }),
+  }
+}
+
+/** Expired-read result text for an evicted child id. Explicit, never a fabricated payload. */
+export function buildExpiredReadback(agentId: string): string {
+  return (
+    `Handover for subagent ${agentId} has expired and is no longer stored: ` +
+    `size-based retention evicted its whole chain to stay within the plugin store budget. ` +
+    `This compact closure tombstone preserves the lock: the child remains handed over and locked, ` +
+    `it cannot do more work, and it must not be messaged or resumed. ` +
+    `Start a fresh subagent to investigate and continue; do not treat this id as a new chain origin for lineage.`
+  )
+}
+
+/** Expired-lock denial for gate/duplicate/handover paths. Keeps the lock wording plus expiry. */
+export function buildExpiredChildDeny(agentId: string): string {
+  return (
+    `This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
+    `Its stored handover has expired under size-based retention (tombstone preserves the lock); ` +
+    `no payload can be recovered for ${agentId}. ` +
+    `Call SubagentHandback now with ONLY a brief expired notice as your final delivery and then stop; ` +
+    `a plain-text final may not reach your parent and does not count as delivery.`
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Size-based retention accounting (fixed policy, no TTL, no configuration).
+// Budget 3 MiB projected; host cap 4 MiB leaves 1 MiB headroom.
+// ---------------------------------------------------------------------------
+
+/** Projected serialized store budget: evict oldest eligible whole chains above this. */
+export const STORE_BUDGET_BYTES = 3 * 1024 * 1024
+
+/** Host plugin-store cap, retained for headroom documentation. */
+export const HOST_CAP_BYTES = 4 * 1024 * 1024
+
+/** UTF-8 byte length without Node APIs (surrogate pairs count 4). */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4
+      i++
+    } else bytes += 3
+  }
+  return bytes
+}
+
+/** Serialized byte size of one store entry: JSON key spelling (quotes and
+ * escapes included) plus colon plus JSON value. */
+export function estimateEntryBytes(key: string, value: unknown): number {
+  let serialized: string
+  try {
+    serialized = JSON.stringify(value) ?? "null"
+  } catch {
+    serialized = "null"
+  }
+  return utf8ByteLength(JSON.stringify(key)) + 1 + utf8ByteLength(serialized)
+}
+
+/**
+ * Complete serialized store estimate over all keys with the pending
+ * replacement applied (old entry for pendingKey subtracted, new added).
+ * Counts every key family, not only payload keys. Models the aggregate JSON
+ * object: outer braces plus comma separators plus per-entry key/value sizes,
+ * so key escapes and structural punctuation are included, not just raw payload
+ * bytes. Missing (undefined) values count as absent (concurrent delete).
+ */
+export function estimateStoreBytes(
+  entries: Iterable<readonly [string, unknown]>,
+  pending?: { readonly key: string; readonly value: unknown },
+): number {
+  const merged = new Map<string, unknown>()
+  for (const [key, value] of entries) {
+    if (value === undefined) continue
+    merged.set(key, value)
+  }
+  if (pending !== undefined) merged.set(pending.key, pending.value)
+  let total = 2
+  let count = 0
+  for (const [key, value] of merged) {
+    total += estimateEntryBytes(key, value)
+    count++
+  }
+  if (count > 0) total += count - 1
+  return total
+}
+
+export type StoreKeyFamily = "child" | "spawn" | "original" | "activity" | "pin" | "other"
+
+export function parseStoreKey(key: string): { readonly family: StoreKeyFamily; readonly id: string } {
+  const at = key.indexOf(":")
+  if (at < 0) return { family: "other", id: key }
+  const head = key.slice(0, at)
+  const id = key.slice(at + 1)
+  if (head === "child" || head === "spawn" || head === "original" || head === "activity" || head === "pin") {
+    return { family: head, id }
+  }
+  return { family: "other", id: key }
+}
+
+/** Chain activity record: last activity per chain. Written without eviction scans. */
+export interface ChainActivity {
+  readonly lastActive: number
+}
+
+export function isChainActivity(value: unknown): value is ChainActivity {
+  if (typeof value !== "object" || value === null) return false
+  return typeof (value as Record<string, unknown>).lastActive === "number"
+}
+
+/** Active-chain pin: spawn-time ownership so live chains survive cross-session eviction. Retired on session end, never TTL-expired. */
+export interface ChainPin {
+  readonly owner: string
+  readonly updatedAt: number
+}
+
+export function isChainPin(value: unknown): value is ChainPin {
+  if (typeof value !== "object" || value === null) return false
+  const record = value as Record<string, unknown>
+  return typeof record.owner === "string" && typeof record.updatedAt === "number"
+}
+
+export function activityKey(chain: string): string {
+  return `activity:${chain}`
+}
+
+export function pinKey(agentId: string): string {
+  return `pin:${agentId}`
+}
+
+export type ChainKind = "origin" | "legacy" | "uncertain"
+
+/**
+ * Protection-boundary classification for one agent id.
+ *
+ * - origin: merged child/spawn lineage names an originAgentId; the id belongs
+ *   to that origin's whole chain. Every claim agrees (origins match,
+ *   predecessors match, generations match); any both-present disagreement is
+ *   a conflict, never guessed: uncertain.
+ * - legacy: no lineage claims at all in either record (every lineage field
+ *   absent). Explicitly evictable. A generation without any origin or
+ *   predecessor is still a claim, not legacy.
+ * - uncertain: an explicit unresolvable-lineage observation, a
+ *   present-but-invalid (malformed) lineage field such as an empty origin, a
+ *   predecessor without a resolvable origin, a generation without lineage, or
+ *   conflicting claims. Never inferred, never evicted; retains
+ *   conservatively.
+ */
+export function classifyChain(
+  child: ChildRecord | ChildTombstone | undefined,
+  spawn: SpawnProvenance | undefined,
+): { readonly kind: ChainKind; readonly origin?: string } {
+  // Explicit uncertainty persists across reloads: a malformed-marker
+  // observation never resolves to an evictable chain.
+  if (spawn?.lineageUncertain === true) return { kind: "uncertain" }
+  // Raw reads: stored JSON may hold present-but-invalid lineage values that
+  // the typed guards do not reject (records) or that fail them (spawn). Any
+  // present, non-undefined lineage field that is not a valid value is a
+  // malformed claim, never an absent one.
+  const childRaw = child as Record<string, unknown> | undefined
+  const spawnRaw = spawn as Record<string, unknown> | undefined
+  const validText = (value: unknown): string | undefined =>
+    typeof value === "string" && value.length > 0 ? value : undefined
+  const malformedText = (value: unknown): boolean => value !== undefined && validText(value) === undefined
+  const validGeneration = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined
+  const malformedGeneration = (value: unknown): boolean => value !== undefined && validGeneration(value) === undefined
+  if (
+    malformedText(childRaw?.originAgentId) || malformedText(spawnRaw?.originAgentId) ||
+    malformedText(childRaw?.predecessorAgentId) || malformedText(spawnRaw?.predecessorAgentId) ||
+    malformedGeneration(childRaw?.generation) || malformedGeneration(spawnRaw?.generation)
+  ) {
+    return { kind: "uncertain" }
+  }
+  const childOrigin = validText(childRaw?.originAgentId)
+  const spawnOrigin = validText(spawnRaw?.originAgentId)
+  // Conflicting claims are never guessed: retain as uncertain.
+  if (childOrigin !== undefined && spawnOrigin !== undefined && childOrigin !== spawnOrigin) {
+    return { kind: "uncertain" }
+  }
+  const childPredecessor = validText(childRaw?.predecessorAgentId)
+  const spawnPredecessor = validText(spawnRaw?.predecessorAgentId)
+  if (childPredecessor !== undefined && spawnPredecessor !== undefined && childPredecessor !== spawnPredecessor) {
+    return { kind: "uncertain" }
+  }
+  const childGeneration = validGeneration(childRaw?.generation)
+  const spawnGeneration = validGeneration(spawnRaw?.generation)
+  if (childGeneration !== undefined && spawnGeneration !== undefined && childGeneration !== spawnGeneration) {
+    return { kind: "uncertain" }
+  }
+  const origin = childOrigin ?? spawnOrigin
+  if (origin !== undefined) return { kind: "origin", origin }
+  const predecessor = childPredecessor ?? spawnPredecessor
+  if (predecessor !== undefined) return { kind: "uncertain" }
+  // A generation without any origin or predecessor is an unverifiable claim.
+  if (childGeneration !== undefined || spawnGeneration !== undefined) return { kind: "uncertain" }
+  return { kind: "legacy" }
+}
+
+export interface ChainGroup {
+  /** Origin id for origin chains, singleton id for legacy chains. */
+  readonly chain: string
+  readonly kind: ChainKind
+  readonly keys: string[]
+  /** Last activity: activity record wins, else max storedAt, else 0 (legacy/untimestamped sort oldest). */
+  readonly lastActive: number
+}
+
+export function chainActivityOf(chain: string, byKey: Map<string, unknown>): number | undefined {
+  const value = byKey.get(activityKey(chain))
+  return isChainActivity(value) ? value.lastActive : undefined
+}
+
+function storedAtOf(value: unknown): number | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const at = (value as Record<string, unknown>).storedAt
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined
+}
+
+/**
+ * Group store keys into whole chains. Origin chains collect every member id
+ * resolving to that origin plus original:<origin> and activity:<origin>.
+ * Legacy ids form singleton chains. Uncertain ids form singleton groups
+ * flagged uncertain (never evictable). Unknown/other families ride along with
+ * the size estimate but are never evicted by chain reclamation.
+ * Present-but-unverifiable child/spawn values are quarantined into uncertain
+ * singletons and never attached to a valid member chain, as is a child
+ * record whose recorded agentId conflicts with its store key; an orphan
+ * original/activity key named as a predecessor, origin, or claimed identity
+ * by any (valid or raw malformed) member stays with that member's chain
+ * instead of being reclaimed independently.
+ */
+export function groupChains(byKey: Map<string, unknown>): Map<string, ChainGroup> {
+  const childOf = new Map<string, ChildRecord | ChildTombstone>()
+  const spawnOf = new Map<string, SpawnProvenance>()
+  // Undefined means absent (concurrent delete), never malformed.
+  const malformedKeys = new Set<string>()
+  const malformedIds = new Set<string>()
+  for (const [key, value] of byKey) {
+    const parsed = parseStoreKey(key)
+    if (value === undefined) continue
+    if (parsed.family === "child" && (isChildRecord(value) || isChildTombstone(value))) {
+      // A conflicting recorded identity (agentId disagrees with the store
+      // key) is never guessed: quarantine as uncertain, never attach it to a
+      // valid member chain.
+      if (value.agentId !== parsed.id) {
+        malformedKeys.add(key)
+        malformedIds.add(parsed.id)
+      } else childOf.set(parsed.id, value)
+    } else if (parsed.family === "spawn" && isSpawnProvenance(value)) spawnOf.set(parsed.id, value)
+    else if (parsed.family === "child" || parsed.family === "spawn") {
+      malformedKeys.add(key)
+      malformedIds.add(parsed.id)
+    }
+  }
+  const groups = new Map<string, ChainGroup>()
+  const taken = new Set<string>()
+  const groupOfMember = new Map<string, ChainGroup>()
+  const take = (mapKey: string, chain: string, kind: ChainKind, key: string): ChainGroup => {
+    let group = groups.get(mapKey)
+    if (!group) {
+      group = { chain, kind, keys: [], lastActive: 0 }
+      groups.set(mapKey, group)
+    }
+    if (!taken.has(key)) {
+      group.keys.push(key)
+      taken.add(key)
+    }
+    return group
+  }
+  // Quarantine first: a malformed key (plus the id's original/activity, which
+  // document the same unverifiable chain) forms an uncertain singleton and is
+  // never attached to a valid member chain.
+  for (const id of [...malformedIds].sort()) {
+    let home: ChainGroup | undefined
+    for (const key of [`child:${id}`, `spawn:${id}`, originalRecordKey(id), activityKey(id)]) {
+      if (byKey.has(key)) home = take(`uncertain:${id}`, id, "uncertain", key)
+    }
+    // Orphan original/activity keys naming this quarantined id as a
+    // predecessor/origin resolve their home here instead of becoming
+    // independent reclaimable legacy groups.
+    if (home !== undefined) groupOfMember.set(id, home)
+  }
+  const memberIds = new Set<string>([...childOf.keys(), ...spawnOf.keys()])
+  // First pass: origin chains from verified membership only.
+  for (const id of memberIds) {
+    const classified = classifyChain(childOf.get(id), spawnOf.get(id))
+    if (classified.kind === "origin" && classified.origin !== undefined) {
+      const chain = classified.origin
+      for (const key of [`child:${id}`, `spawn:${id}`]) {
+        if (byKey.has(key) && !malformedKeys.has(key)) groupOfMember.set(id, take(`origin:${chain}`, chain, "origin", key))
+      }
+    }
+  }
+  // Origin-level keys.
+  for (const [mapKey, group] of groups) {
+    if (group.kind !== "origin") continue
+    for (const key of [originalRecordKey(group.chain), activityKey(group.chain)]) {
+      if (byKey.has(key) && !taken.has(key)) take(mapKey, group.chain, group.kind, key)
+    }
+  }
+  // Second pass: legacy and uncertain singletons for ids not in an origin
+  // chain. Origin-classified ids always take their valid keys above; anything
+  // left is legacy (no claims) or uncertain (unresolvable claims).
+  const covered = new Set<string>()
+  for (const id of memberIds) {
+    if (groupOfMember.has(id)) covered.add(id)
+  }
+  for (const id of memberIds) {
+    if (covered.has(id)) continue
+    const classified = classifyChain(childOf.get(id), spawnOf.get(id))
+    const kind: ChainKind = classified.kind === "uncertain" ? "uncertain" : "legacy"
+    for (const key of [`child:${id}`, `spawn:${id}`, originalRecordKey(id), activityKey(id)]) {
+      if (byKey.has(key) && !taken.has(key)) groupOfMember.set(id, take(`${kind}:${id}`, id, kind, key))
+    }
+  }
+  // Identifiable related references from every child/spawn value, valid or
+  // raw malformed: an orphan original/activity key whose id is named as a
+  // predecessor, origin, or conflicting recorded identity by any member stays
+  // with that member's chain instead of being reclaimed as an independent
+  // legacy group. Raw nonempty strings only; nothing is guessed.
+  const referrerOf = new Map<string, string>()
+  const noteReferrer = (ref: unknown, referrer: string): void => {
+    if (typeof ref === "string" && ref.length > 0 && !referrerOf.has(ref)) referrerOf.set(ref, referrer)
+  }
+  for (const [key, value] of byKey) {
+    const parsed = parseStoreKey(key)
+    if (parsed.family !== "child" && parsed.family !== "spawn") continue
+    if (value === undefined || value === null || typeof value !== "object") continue
+    const raw = value as Record<string, unknown>
+    noteReferrer(raw.predecessorAgentId, parsed.id)
+    noteReferrer(raw.originAgentId, parsed.id)
+    // A conflicting recorded identity also names its claimed chain.
+    if (parsed.family === "child") noteReferrer(raw.agentId, parsed.id)
+  }
+  for (const [key] of byKey) {
+    const parsed = parseStoreKey(key)
+    if (parsed.family !== "original" && parsed.family !== "activity") continue
+    if (taken.has(key)) continue
+    const referrer = referrerOf.get(parsed.id)
+    const home = referrer === undefined ? undefined : groupOfMember.get(referrer)
+    if (home !== undefined) {
+      home.keys.push(key)
+      taken.add(key)
+    } else {
+      take(`legacy:${parsed.id}`, parsed.id, "legacy", key)
+    }
+  }
+  // Last activity per group.
+  for (const group of groups.values()) {
+    let last = chainActivityOf(group.chain, byKey) ?? Number.NEGATIVE_INFINITY
+    for (const key of group.keys) {
+      const at = storedAtOf(byKey.get(key))
+      if (at !== undefined && at > last) last = at
+    }
+    (group as { lastActive: number }).lastActive = last === Number.NEGATIVE_INFINITY ? 0 : last
+  }
+  return groups
+}
+
+/**
+ * Oldest-first evictable ordering. Rank 0 is legacy chains plus untimestamped
+ * origin chains (lastActive 0): both count as oldest and are evicted first,
+ * so a recent timestamped legacy still precedes a timestamped origin while an
+ * untimestamped origin is never put behind a recent legacy. Within each rank,
+ * by lastActive ascending (untimestamped 0 sorts oldest), ties by chain id.
+ * Uncertain groups are never returned.
+ */
+export function orderEvictableChains(groups: Map<string, ChainGroup>): ChainGroup[] {
+  const rank = (group: ChainGroup): number => (group.kind === "legacy" || group.lastActive === 0 ? 0 : 1)
+  return [...groups.values()]
+    .filter((group) => group.kind !== "uncertain" && group.keys.length > 0)
+    .sort((a, b) => rank(a) - rank(b) || a.lastActive - b.lastActive || (a.chain < b.chain ? -1 : a.chain > b.chain ? 1 : 0))
 }
 
 const stripBold = (text: string): string => {
@@ -690,10 +1151,13 @@ export function mergeProvenance(primary?: SpawnProvenance, fallback?: SpawnProve
         ? { generation: value.generation } : {}),
       ...(typeof value.originalCaptureError === "string" && value.originalCaptureError.length > 0
         ? { originalCaptureError: value.originalCaptureError.slice(0, 300) } : {}),
+      ...(typeof value.storedAt === "number" && Number.isFinite(value.storedAt)
+        ? { storedAt: value.storedAt } : {}),
+      ...(value.lineageUncertain === true ? { lineageUncertain: true } : {}),
     }
     return built.agentType === undefined && built.modelOverride === undefined &&
       built.predecessorAgentId === undefined && built.originAgentId === undefined && built.generation === undefined &&
-      built.originalCaptureError === undefined
+      built.originalCaptureError === undefined && built.storedAt === undefined && built.lineageUncertain === undefined
       ? undefined
       : built
   }
@@ -713,6 +1177,9 @@ export function mergeProvenance(primary?: SpawnProvenance, fallback?: SpawnProve
       : { generation: (first.generation ?? second.generation) as number },
     ...(first.originalCaptureError ?? second.originalCaptureError) === undefined ? {}
       : { originalCaptureError: (first.originalCaptureError ?? second.originalCaptureError) as string },
+    ...(first.lineageUncertain === true || second.lineageUncertain === true ? { lineageUncertain: true } : {}),
+    ...(first.storedAt ?? second.storedAt) === undefined ? {}
+      : { storedAt: (first.storedAt ?? second.storedAt) as number },
   }
 }
 

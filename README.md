@@ -258,9 +258,41 @@ plugin/marketplace source; no OpenCode host is involved.
   guarantee; the bounded correction conservatively addresses the live report.
 - Full text persists in plugin storage ([4 MiB JSON total, shared across
   sessions](https://code.claude.com/docs/en/plugins/mods/reference#limits)).
-  Retain handovers without automatic eviction; bounded retention/cleanup is
-  separate future work. Original-task write failures preserve a bounded
-   error in spawn metadata when possible and report the cause in full readback;
+  Before payload/provenance writes, estimate the whole serialized store with
+  the proposed replacement. Above 3 MiB, evict oldest eligible whole chains by
+  last activity until it fits. No TTL or configuration; the remaining 1 MiB
+  is estimate headroom, not reserved capacity. Reads and continuations refresh
+  activity. Legacy/untimestamped records sort oldest; spawn-only orphan
+  metadata participates in the same activity ordering. Legacy groups and
+  groups with no timestamp form the oldest tier; within each tier, activity
+  sorts ascending with chain-id ties. Protect the current chain,
+  active/in-flight chains and uncertain
+  membership rather than guessing lineage. The legacy/orphan exception means
+  no lineage claims at all; malformed/conflicting claims, unresolved references
+  and unreadable membership remain protected, including identifiable related
+  chains. Unknown keys count toward size but are not reclaimed.
+  Expired bodies/originals are
+  permanently unavailable; compact closure tombstones keep handed-over
+  children locked and reads explicitly report `expired`.
+  Insufficient safe space and failed/partial eviction remain explicit and
+  retryable; failed handover storage never claims success or locks the child.
+  Tombstones consume space too. Concurrent sessions can over-evict; store
+  accounting and reclamation are not atomic. Eviction scans run on writes,
+  not reads. The estimate sums UTF-8 bytes of JSON-escaped keys and serialized
+  values, including object braces, colons and commas, after replacing the
+  pending key's old value. It counts all enumerated key families, not just
+  handovers; host-internal representation can differ. Incomplete scans refuse
+  the pending persistence rather than treating unreadable entries as zero.
+  New child records store the model's summary once and derive the short reply;
+  historical records with persisted short replies remain readable.
+  Active protection combines local in-flight reservations, nonterminal
+  listings and persisted child pins. Only documented `completed`, `failed`
+  and `killed` statuses release listing protection; unknown statuses retain it.
+  A matching `turn.complete` retires the pin; `session.end` best-effort removes
+  only that session's pins, never payloads. Crashes or failed cleanup can leave
+  stale pins indefinitely, reducing safely reclaimable space.
+  Original-task write failures preserve a bounded
+  error in spawn metadata when possible and report the cause in full readback;
   if all writes fail, reload can lose that cause and readback reports unknown.
   Handover storage failures are explicit errors, not successful handovers.
   Native output
@@ -268,6 +300,14 @@ plugin/marketplace source; no OpenCode host is involved.
   real allowlists, child feedback routing, classifier review of short returns, resumptions, and
   installed-package loading. Delivery guidance is advisory shaping, not a
   deterministic replacement.
+- Per-child usage, baseline, growth, spawn-observation and nudge caches retire
+  on closed-child stop or matching turn completion. Handback/correction latches
+  survive a blocked stop and retire only at actual turn completion or session
+  end. A genuinely new open turn re-enables measurement and re-pins before its
+  first request; a lost baseline remains `unknown`, not a fabricated restart.
+  Auxiliary retired/provenance/error/seen-turn histories are capped at 1000
+  child ids, with at most 10 remembered turn ids per child. Session end clears
+  transient measurement and correction state; durable locks remain.
 - `hooks/claude-types.ts` is a narrow structural subset of the mod
   contracts, not full API verification, and carries no live version claim.
 
@@ -276,7 +316,7 @@ requirements checklist with per-adapter status and evidence.
 
 ## Storage
 
-Fallback B: everything lives in session-keyed KV, never in external files.
+OpenCode fallback B: everything lives in session-keyed KV, never in external files.
 The host persists complete tool-call inputs (`packages/schema/src/session-message.ts:148-154`,
 `packages/core/src/session/sql.ts:84-96` at pinned `19d87a7`), but server
 plugins expose no full-history API and `ctx.session.context` is filtered

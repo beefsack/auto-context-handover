@@ -43,6 +43,7 @@ export interface AgentInfo {
   readonly description?: string
   readonly type?: string
   readonly parentId?: string
+  /** Engine task status: running, completed, failed, killed, or another engine status. Absent/unknown retains liveness. */
   readonly status?: string
 }
 
@@ -142,6 +143,8 @@ export interface Engine {
     readonly get: (key: string) => Promise<unknown>
     readonly set: (key: string, value: unknown) => Promise<void>
     readonly delete: (key: string) => Promise<void>
+    /** All keys. The official host supports enumeration; without it advisory hooks skip their scan (no eviction), while handover persistence explicitly refuses the write (retryable). */
+    readonly keys: () => Promise<string[]>
   }
   readonly agent: {
     readonly list: () => Promise<AgentInfo[]>
@@ -188,10 +191,26 @@ export interface On {
   (event: "classic.SubagentStop", hook: PlainHook<ClassicSubagentStopEvent, ClassicSubagentStopResult>): HookRegistration<ClassicSubagentStopEvent, ClassicSubagentStopResult>
   (event: "agent.spawn", hook: PlainHook<AgentSpawnInput, AgentSpawnResult>): HookRegistration<AgentSpawnInput, AgentSpawnResult>
   (event: "tool.call", hook: PlainHook<ToolCallEvent, ToolCallResult>): HookRegistration<ToolCallEvent, ToolCallResult>
+  (event: "session.end", hook: PlainHook<SessionEndEvent, unknown>): HookRegistration<SessionEndEvent, unknown>
+  (event: "turn.complete", hook: PlainHook<TurnCompleteEvent, unknown>): HookRegistration<TurnCompleteEvent, unknown>
 }
 
 export interface RegisterOptions {
   readonly soft?: unknown
+  readonly [field: string]: unknown
+}
+
+export interface SessionEndEvent {
+  readonly reason?: unknown
+  readonly sessionId?: unknown
+  readonly resume?: unknown
+  readonly [field: string]: unknown
+}
+
+export interface TurnCompleteEvent {
+  readonly agentId?: unknown
+  readonly turnId?: unknown
+  readonly reason?: unknown
   readonly [field: string]: unknown
 }
 
