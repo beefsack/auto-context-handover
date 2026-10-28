@@ -5,14 +5,16 @@
 // names, and no lock semantics. Each adapter adds its own call/policy framing
 // around it.
 export const HANDOVER_SECTIONS = `Write the handover with these sections:
-1. Original instructions, role, and constraints (verbatim where it matters): role; active user scope and critical rules/prohibitions verbatim, or verified reload instructions (file/skill); agent, provider/model/variant, permissions/tool restrictions, config scope, delegation/question/commit limits.
+1. Original instructions, role, and constraints (verbatim where it matters): role; active user scope and critical rules/prohibitions verbatim, or verified reload instructions (file/skill); permissions/tool restrictions, config scope, delegation/question/commit limits.
 2. Completed work and decisions: changed files; explicit user decisions vs implicitly accepted proposals vs agent-adopted choices; separate direct verification (command/result) from others' reports (source), live observations, and unverified work.
-3. In-progress work and exact current state: exact stopping point, unresolved risks, continuation/compaction status, known predecessor session ID chain; flag history gaps.
+3. In-progress work and exact current state: exact stopping point, unresolved risks, continuation/compaction status; flag history gaps.
 4. Key snippets (short, copyable): only essential snippets.
 5. Negative knowledge: explicit dead ends, failed approaches, what NOT to try again.
-6. Prioritized next steps for the successor session: steps the successor can execute directly; reaching the context limit is not a roadblock and never a reason to ask the user; escalate only a user-owned decision that is independent of the context limit.
+6. Prioritized next steps for the successor session: steps the successor can execute directly; reaching the context limit is not a roadblock and never a reason to ask the user; escalate only a user-owned decision that is independent of the context limit. Keep open questions explicitly; do not drop them.
 
 State instruction deviations, triggered stop conditions, failed or erroring calls, and unverified claims plainly; never mark work PASS or complete while a deviation or triggered stop is unresolved; the summary must not claim more than the body.
+
+Do not describe your own agent type, model (including override), or chain; the plugin records authoritative provenance and the parent uses the plugin record even if this handover says otherwise.
 
 Prefer durable docs over repeated background; omit personal trivia; never trim unresolved risks or verification distinctions; mark unknowns rather than inventing history/controls. Keep concise and avoid repetitive prose.`
 
@@ -28,6 +30,7 @@ export const CHILD_SUMMARY_PREFIX = "Context handover (incomplete):"
 export const SEED_FRAMING =
   `The original task is reference only; completed steps are done and must not be repeated. ` +
   `Predecessor facts are trusted unless marked unverified; preserve verification distinctions and do not recast predecessor direct evidence as successor direct verification. ` +
+  `Targeted rereads of already-covered material are allowed only to resolve open questions; never repeat completed steps. ` +
   `Continue from 'Prioritized next steps'.`
 
 // Shared child rollover guidance appended to child nudges and directives.

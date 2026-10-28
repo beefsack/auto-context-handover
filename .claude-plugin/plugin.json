@@ -1,6 +1,6 @@
 {
   "name": "auto-context-handover",
-  "description": "Subagent-only context handover for Claude Code: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children. Root sessions are untouched.",
+  "description": "Subagent-only context handover for Claude Code: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children. Roots get a context-only introduction; native compaction is unchanged.",
   "version": "0.1.0",
   "license": "MIT",
   "userConfig": {

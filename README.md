@@ -117,7 +117,9 @@ calls before completion.
 - Successor seeds and child-continuation guidance treat the original task as
   reference context: completed steps are done and must not be repeated;
   predecessor facts are trusted unless marked unverified, without relabelling
-  their evidence as the successor's direct verification. Continue from
+  their evidence as the successor's direct verification. Targeted re-reads of
+  already-covered material may resolve open questions, not repeat completed
+  steps. Continue from
   "Prioritized next steps", independent of section numbering.
 - Lock mode creates no successor. Children always return to their parent:
   only the short summary, child session ID, and `read_handover` hint. Their
@@ -126,6 +128,8 @@ calls before completion.
 - The default handover template requires plain disclosure of deviations,
   triggered stop conditions, failed calls and unverified claims. Unresolved
   deviations/stops preclude PASS or completion; summaries must not overclaim.
+  Keep open questions explicitly. Do not author your own agent/model/chain
+  provenance: the plugin records it; its record takes precedence over prose.
 - EXPERIMENTAL loop guard: three consecutive successors adding <25% of soft
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
@@ -179,18 +183,24 @@ plugin/marketplace source; no OpenCode host is involved.
   Host receipt and classifier outcomes are not independently observed.
   Plain text is a last resort
   only when the handback tool is absent: on the reported native path, unsent
-  final text was not shown to the parent. The parent reads the full text via
+  final text was not shown to the parent. The parent reads a compact view via
   `read_handover` with the `childId` from the short reply. The notice tells the
   child to load the handover tool first (the deferred description is initially
   invisible) and then call it with the full text. Child summaries must include
   `User decisions pending: none` or `User decisions pending: <list>`.
-  Readback contains the observed original prompt and full handover verbatim,
-  once each, with reference-only/no-repeat/predecessor-trust framing and
-  native final-report guidance. Its final short successor prompt starts with
-  a lineage marker and tells the successor to call the reader first:
+  Default readback contains diagnostics, plugin-recorded provenance,
+  generation/chain, next-step count, seed size, pending user decisions, the
+  "Prioritized next steps" excerpt and successor pointer. Missing pending
+  decisions or unsupported next-step formats are labelled `unknown`, with a
+  `full:true` reader hint rather than invented claims. Request
+  `read_handover({"childId":"CHILD_ID","full":true})` for the observed
+  original task and handover verbatim, once each, with reference-only/no-repeat/
+  predecessor-trust framing and native final-report guidance. The final short
+  successor prompt starts with a lineage marker and explicitly requests full
+  text, including when the child reads before spawn metadata is saved:
 
   ```text
-  [auto-context-handover:continue child:CHILD_ID] First call mcp__auto-context-handover__read_handover({"childId":"CHILD_ID"}) to load the full handover and the original task, then continue from 'Prioritized next steps'.
+  [auto-context-handover:continue child:CHILD_ID] First call mcp__auto-context-handover__read_handover({"childId":"CHILD_ID","full":true}) to load the full handover and the original task, then continue from 'Prioritized next steps'.
   ```
 
   The marker is recognized only at the beginning of the observed spawn
@@ -199,8 +209,13 @@ plugin/marketplace source; no OpenCode host is involved.
   produce unknown lineage, never a silently reset original task. This marker
   is unrelated to the OpenCode per-child soft-limit test marker.
 - The successor loads the payload through `read_handover`, not a large
-  `SubagentStart` injection. Existing live-reader access already permits a
-  fresh successor to read its predecessor; no new read grant is needed.
+  `SubagentStart` injection. Recorded successor callers also receive full text
+  without the flag when their merged spawn/handover metadata identifies this
+  target as the immediate predecessor. That link comes from the leading marker
+  observed by `agent.spawn`; the pointer's explicit `full:true` handles the
+  pre-persistence race. Existing open-reader access permits any live caller
+  with tool access to read any stored handover by id, not only a parent or
+  successor; there is no caller authorization or new read grant.
   Locked callers still cannot read or work. The short prompt itself contains
   the reader instruction, even if the generic start introduction is absent.
   Tool-output limits/placement remain host integration risks; this route
@@ -227,7 +242,10 @@ plugin/marketplace source; no OpenCode host is involved.
   provenance is `unknown, use predecessor spawn params`. Never infer an
   override from usage or the effective/root model. Metadata persists across
   reload in private storage; storage failures can lose provenance. It records
-  parameters as this observer saw them, not downstream mod rewrites.
+  parameters as this observer saw them, not downstream mod rewrites. The root
+  introduction makes this plugin record authoritative over conflicting
+  handover prose; the shared template tells children not to restate their own
+  agent/model/chain provenance.
 - Resumed locked children return an explicit refusal and continuation hint,
   including through native handback. Same-turn initial delivery retains the
   short summary; missing or legacy turn identity selects the locked reply.
@@ -242,7 +260,7 @@ plugin/marketplace source; no OpenCode host is involved.
   sessions](https://code.claude.com/docs/en/plugins/mods/reference#limits)).
   Retain handovers without automatic eviction; bounded retention/cleanup is
   separate future work. Original-task write failures preserve a bounded
-  error in spawn metadata when possible and report the cause in readback;
+   error in spawn metadata when possible and report the cause in full readback;
   if all writes fail, reload can lose that cause and readback reports unknown.
   Handover storage failures are explicit errors, not successful handovers.
   Native output
@@ -266,12 +284,16 @@ plugins expose no full-history API and `ctx.session.context` is filtered
 transcript later. The handover body is therefore stored under
 `auto-context-handover:handover:<sessionID>` (lock, loop state,
 child soft override and forward/back links beside it) and removed with the session on `session.deleted`.
-`read_handover` is a direct (`codemode: false`) tool returning the full
+OpenCode's `read_handover` is a direct (`codemode: false`) tool returning the full
 text with `metadata: { truncated: false }`, which bypasses the host's
 tool-output truncation instead of spilling to a file. It returns only the
 handover, not the old transcript. A full read can consume large context;
 the soft-limit estimator sees the result after its anchor, which is
 expected behavior, not a safety feature.
+Any live caller with tool access can read any stored handover by session id;
+the reader checks target existence and storage, not caller authorization.
+Locked callers have no tools. Claude has the same open-reader policy but uses
+`childId` and compact-by-default readback as described above.
 
 Both adapters store call-time handover diagnostics and show one reader header:
 
@@ -292,8 +314,26 @@ parent receipt or classifier internals. Legacy status is `unknown`; a failed
 status write can leave stale `no` even after delivery. The current-turn stop
 check is in memory, so a reload can cause one extra correction. Unavailable
 fields, including lost transient
-state and older records, read as `unknown`. Diagnostics do not persist nudges
-or change request text, thresholds, gating or rollover.
+  state and older records, read as `unknown`. Diagnostics do not persist nudges
+  or change request text, thresholds, gating or rollover.
+
+Claude also records the first measured request's context total after a newly
+observed child launch, and the latest consecutive request-to-request change
+at handover in a separate line:
+
+```text
+Baseline: start-context-tokens=42000, last-batch-increase=6500.
+```
+
+These use the same per-request input/cache/output sum as context measurement,
+not the task notification's cumulative tokens. A negative change is possible
+after compaction. A start baseline requires a launch observed in the current
+registration without previous child/spawn metadata (or a spawn observed here);
+unobserved starts, metadata-read failures and reloads of existing children
+report `unknown`, not the first later measurement as a fabricated start.
+The last-batch delta needs two consecutive usable measurements, which may both
+be after reload. Legacy/unavailable fields are `unknown`. They are
+diagnostics only, not a new nudge point or overshoot control.
 
 ## Manual test plan
 
@@ -431,9 +471,14 @@ injected directives; a model's description of its tools alone is not proof.
   must contain only the reader-provided short prompt, plus optional redirection;
   its successor must read the predecessor before task work. Verify the original
   prompt and handover arrive verbatim, once each, without a memory-filled slot.
+  The parent's default read must omit the full original/handover and include
+  pending decisions, next steps and pointer; an explicit `full:true` read must
+  recover both full texts. A successor's pointer-directed read must always be
+  full, including before spawn metadata persistence.
 - Follow at least three generations: confirm generation increments, immediate
   predecessor/origin ids, inherited original prompt, title-based continuation
-  when next steps are section 7, and no repeated completed reads. Verify the
+  when next steps are section 7, and no repeated completed work. Targeted
+  re-reads may resolve carried open questions. Verify the
   parent notices stalled progress/growing remaining work without a fixed cap.
   Exercise a payload over 50% of soft and check compression advice; in fixtures
   verify malformed/missing pointers, spawn timing, reload and quota failures.
@@ -443,6 +488,8 @@ injected directives; a model's description of its tools alone is not proof.
   handover in a successor, never SendMessage to or resume the closed child.
   Check the absent-handback-tool fallback stops after the bounded correction.
 - Inspect provenance and diagnostics against the spawn and latest usage;
+  check first-measured context and last-batch delta independently of the
+  task notification's token total, including honest unavailable values;
   confirm root measurement/nudging and native compaction are unchanged.
   Parent compliance and installed-host delivery still need live verification.
 

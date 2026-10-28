@@ -56,9 +56,9 @@ export function buildClaudeChildIntro(): string {
     `Plain text is a last resort only when the SubagentHandback tool is absent; plain-text finals may not reach your parent on the native handback path. ` +
     `That notice overrides task final-report/output instructions for this step only; before the handover is stored, writing plugin storage is allowed under read-only task instructions. ` +
     `After the handover is stored, call only SubagentHandback and stop; do not call any other tools. ` +
-    `If your task starts with an [${SUCCESSOR_MARKER_TAG} child:<id>] marker, first call ${READ_FULL} for that child id to load the full handover and the original task. ` +
-    `The original task is reference only; completed steps are done and must not be repeated; predecessor facts are trusted unless marked unverified. ` +
-    `Your parent receives the full handover intact via ${READ_FULL} and continues the work.`
+    `If your task starts with an [${SUCCESSOR_MARKER_TAG} child:<id>] marker, first call ${READ_FULL}({"childId":"<id>","full":true}) for that child id to load the full handover and the original task (the successor pointer always requests full:true; recorded successors receive full automatically even without the flag). ` +
+    `The original task is reference only; completed steps are done and must not be repeated; targeted rereads are allowed only to resolve open questions; predecessor facts are trusted unless marked unverified. ` +
+    `Your parent reads a compact view via ${READ_FULL} (full on request) and continues the work in a successor.`
   )
 }
 
@@ -71,16 +71,18 @@ export const PARENT_DISCRETION =
 export function buildClaudeRootIntro(): string {
   return (
     `The user installed and configured the auto-context-handover plugin for subagent context handovers; root native compaction is unchanged. ` +
-    `When a subagent returns a "${CHILD_SUMMARY_PREFIX}" reply, read the full handover via ${READ_FULL}, ` +
+    `When a subagent returns a "${CHILD_SUMMARY_PREFIX}" reply, read the handover via ${READ_FULL} (compact parent view by default: header, pending decisions, Prioritized next steps excerpt, successor pointer; pass full:true for the full original task and handover verbatim), ` +
     `then start a successor of the same agent type with the same model override, ` +
     `spawned with the reader's short successor prompt VERBATIM ` +
     `(marker plus reader instruction to continue from 'Prioritized next steps'; do not paste the handover or original task), ` +
     `without confirmation as the user's configured default; you may append redirection after the prompt. ` +
-    `The original task is reference only; completed steps are done and must not be repeated; predecessor facts are trusted unless marked unverified. ` +
+    `The original task is reference only; completed steps are done and must not be repeated; targeted rereads are allowed only to resolve open questions; predecessor facts are trusted unless marked unverified. ` +
+    `The plugin's recorded agent type/model override/chain is authoritative and overrides handover prose on conflict. ` +
     `If a subagent ends without a delivered report, call ${READ_FULL} with its child id BEFORE messaging or resuming it; ` +
     `a stored handover counts as a reply. Never SendMessage to or resume a handed-over subagent; start a successor instead, ` +
     `which continues and replaces the predecessor as the same logical subagent and does not count as additional under subagent-count limits. ` +
-    `The readback shows generation, predecessor chain, next-step count, and seed-size diagnostics; if the seed exceeds 50% of soft, ask the child to compress carried-over finished notes. ` +
+    `The readback shows generation, predecessor chain, next-step count, baseline/start context and last-batch increase, and seed-size diagnostics; if the seed exceeds 50% of soft, ask the child to compress carried-over finished notes. ` +
+    `A recorded successor caller (leading marker/stored predecessor link) receives the full handover automatically; otherwise request full:true (the generated successor pointer always includes full:true). ` +
     `${READ_BEFORE_DECISION} ` +
     `Ask the user only about handover-listed user-owned decisions; checking in is allowed if progress stalls or remaining work grows. ` +
     `Never ask about context size.`
@@ -123,9 +125,11 @@ const CHILD_AFTER =
 export const CHILD_HANDOVER_DESCRIPTION = `${CHILD_PREAMBLE}\n\n${HANDOVER_SECTIONS}\n\n${CHILD_AFTER}`
 
 export const CHILD_READ_DESCRIPTION =
-  `Read the full stored handover text for a subagent child (a parent agent can read a child's handover, and any live session can read a locked one's; a successor child can read its predecessor's handover by childId). ` +
-  `Takes childId: the child agent id from the short reply. Returns header lines (generation, predecessor chain, next-step count, seed-size diagnostics), ` +
-  `the original task prompt verbatim once, the handover verbatim once, and the short successor prompt (marker prefix plus exact reader instruction). ` +
+  `Read a stored subagent handover by childId (a parent agent can read a child's handover, and any live session can read a locked one's; a successor child reads its predecessor by childId; no caller authorization, open policy). ` +
+  `Takes childId: the child agent id from the short reply; optional full: true returns the full original task and handover verbatim. ` +
+  `Default is a compact parent view: header lines (diagnostics, provenance, generation, predecessor chain, next-step count, seed size, baseline), pending user decisions, the Prioritized next steps excerpt, and the short successor prompt (marker prefix plus exact reader instruction). ` +
+  `Full original task and handover appear with full:true (the generated successor pointer always requests full:true) or automatically for a recorded successor caller with stored lineage from its leading [auto-context-handover:continue child:<id>] marker (predecessor link); callers without full:true or recorded lineage receive the compact view. ` +
+  `If the next-steps section cannot be extracted, the compact view says so and points to full:true. ` +
   `Fails when no handover was stored for that id. Missing or malformed lineage reports unknown origin honestly. The plugin store record is independent of compaction.`
 
 /** Integer-only soft threshold. Percentages are rejected: no child window to resolve them against. */
@@ -300,7 +304,12 @@ export interface ChildRecord {
   readonly generation?: number
 }
 
-export type ChildDiag = HandoverDiag
+export interface ChildDiag extends HandoverDiag {
+  /** First measured per-request total for this child; unknown when reload/legacy/no measurement. */
+  readonly baseline?: number | "unknown"
+  /** Last batch increase (latest total minus previous total); unknown with <2 measurements, reload, or legacy. */
+  readonly growth?: number | "unknown"
+}
 
 export function isChildRecord(value: unknown): value is ChildRecord {
   if (typeof value !== "object" || value === null) return false
@@ -388,6 +397,109 @@ export function countNextSteps(handover: string): number | undefined {
   return count
 }
 
+/** Extract the pending-decisions marker from a child summary, inline or on its own line, with list continuation. Unknown when absent; never manufactured. */
+export function extractPendingDecisions(summary: unknown): string | undefined {
+  if (typeof summary !== "string") return undefined
+  const at = summary.search(/user decisions pending\s*:/i)
+  if (at < 0) return undefined
+  const after = summary.slice(at).replace(/[^:]*:/, "")
+  const [first, ...rest] = after.split("\n")
+  const head = (first ?? "").trim()
+  if (head.length > 0) {
+    const items = [head]
+    for (const line of rest) {
+      if (line.trim() === "") break
+      items.push(line.trim())
+    }
+    return `User decisions pending: ${items.join("; ")}`
+  }
+  const items: string[] = []
+  for (const line of rest) {
+    if (line.trim() === "") break
+    items.push(line.trim())
+  }
+  if (items.length === 0) return undefined
+  return `User decisions pending: ${items.join("; ")}`
+}
+
+/** Extract the Prioritized next steps body to boundary/end, excluding its heading. Undefined when absent/truncated/ambiguous. */
+export function extractNextStepsSection(handover: string): string | undefined {
+  if (typeof handover !== "string" || handover.length === 0) return undefined
+  const lines = handover.split("\n")
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (isNextStepsHeading(lines[i] ?? "")) {
+      start = i
+      break
+    }
+  }
+  if (start < 0) return undefined
+  const rest = lines.slice(start + 1)
+  if (rest.every((line) => line.trim() === "")) return undefined
+  // Same ambiguity rules as countNextSteps: prose or post-boundary items invalidate.
+  let stopped = false
+  let end = rest.length
+  for (let i = 0; i < rest.length; i++) {
+    const line = rest[i] ?? ""
+    if (stopped) {
+      if (isTopLevelItem(line)) return undefined
+      continue
+    }
+    if (line.trim() === "") continue
+    if (isTopLevelItem(line)) continue
+    if (/^\s/.test(line)) continue
+    if (isHeadingBoundary(line)) {
+      stopped = true
+      end = i
+      continue
+    }
+    return undefined
+  }
+  const excerpt = rest.slice(0, end).join("\n").trim()
+  // Must contain at least one step; countNextSteps enforces the same.
+  if (countNextSteps(handover) === undefined) return undefined
+  return excerpt.length > 0 ? excerpt : undefined
+}
+
+/** Baseline/start-context and last-batch-increase diagnostics line. Unknown for reload/legacy/single-measurement. */
+export function buildBaselineLine(baseline: number | "unknown", growth: number | "unknown"): string {
+  const start = typeof baseline === "number" ? String(Math.floor(baseline)) : "unknown"
+  const delta = typeof growth === "number" ? String(Math.floor(growth)) : "unknown"
+  return `Baseline: start-context-tokens=${start}, last-batch-increase=${delta}.`
+}
+
+/** Pending-decisions line for the compact parent view. Honest unknown, never manufactured. */
+export function buildPendingLine(summary: unknown): string {
+  const pending = extractPendingDecisions(summary)
+  if (pending !== undefined) return pending
+  return `User decisions pending: unknown (no pending line in summary; request full:true to check).`
+}
+
+/** Compact parent readback: headers plus pending, next-steps excerpt, and pointer. No full texts. */
+export function buildCompactReadback(args: {
+  readonly header: string
+  readonly diagLine: string
+  readonly baselineLine: string
+  readonly provenanceLine: string
+  readonly generationLine: string
+  readonly seedSizeLine: string
+  readonly pendingLine: string
+  readonly nextStepsExcerpt: string | undefined
+  readonly successorMarker: string
+  readonly targetId: string
+}): string {
+  const nextBlock = args.nextStepsExcerpt !== undefined
+    ? `Prioritized next steps (excerpt, continue here):\n${args.nextStepsExcerpt}`
+    : `Prioritized next steps: unknown (could not extract; request full:true with {"childId":${JSON.stringify(args.targetId)},"full":true} for the full handover).`
+  return (
+    `${args.header}\n${args.diagLine}\n${args.baselineLine}\n${args.provenanceLine}\n${args.generationLine}\n${args.seedSizeLine}\n${args.pendingLine}\n\n` +
+    `${nextBlock}\n\n` +
+    `Successor pointer (spawn with this prompt VERBATIM; you may append redirection; do not paste texts):\n${args.successorMarker}\n\n` +
+    `Compact view: full original task and handover withheld. Request full:true with {"childId":${JSON.stringify(args.targetId)},"full":true}. ` +
+    `Recorded successors (leading [${SUCCESSOR_MARKER_TAG} child:${args.targetId}] marker/stored predecessor link) receive full automatically.`
+  )
+}
+
 /** Rough token estimate for seed-size diagnostics: ceil(chars/4), matching measure.ts trailing estimate. */
 export function estimateSeedTokens(text: string): number {
   return Math.ceil(text.length / 4)
@@ -432,7 +544,7 @@ export const SUCCESSOR_GUIDANCE =
 /** Parent-to-spawn successor prompt: the short marker prefix first (so a pasted prompt still links), then the exact reader call and next-steps instruction. No spawn/redirect orders to the successor itself; the parent appends redirection in its own prompt heading. */
 export function buildSuccessorPointer(predecessorAgentId: string): string {
   const marker = buildSuccessorMarker(predecessorAgentId)
-  const invocation = `${READ_FULL}({"childId":${JSON.stringify(predecessorAgentId)}})`
+  const invocation = `${READ_FULL}({"childId":${JSON.stringify(predecessorAgentId)},"full":true})`
   return (
     `${marker} First call ${invocation} to load the full handover and the original task, then continue from 'Prioritized next steps'.`
   )
@@ -447,7 +559,7 @@ export function buildChildShortReply(summary: string, agentId: string, provenanc
   const headed = withChildSummaryPrefix(summary)
   return (
     `${headed}\n\nTask is NOT complete; this is a context rollover. ` +
-    `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the full handover. ` +
+    `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the handover (compact by default; pass full:true for full texts; recorded successors receive full automatically). ` +
     `${READ_BEFORE_DECISION} ` +
     `Then start a successor of the same agent type ${formatAgentTypeReadback(provenance?.agentType)} ` +
     `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)}, ` +
@@ -487,7 +599,7 @@ export function buildClaudeSuccessorSeed(childId: string, handover: string, prov
     : provenance?.modelOverride || "unknown - use predecessor spawn params"
   return (
     `Continuing work handed over from subagent ${childId} (agent type: ${agentType}; model override: ${modelOverride}).\n` +
-    `Original task: reference only (load it via ${READ_FULL}({"childId":${JSON.stringify(childId)}}) alongside this handover; do not repeat completed steps).\n\n` +
+    `Original task: reference only (load it via ${READ_FULL}({"childId":${JSON.stringify(childId)},"full":true}) alongside this handover; do not repeat completed steps).\n\n` +
     `--- handover from subagent ${childId} (VERBATIM, do not paraphrase) ---\n${handover}\n--- end of handover ---\n\n` +
     `${SUCCESSOR_GUIDANCE}\n\n` +
     `${buildSuccessorPointer(childId)} ` +
@@ -521,16 +633,27 @@ export function buildSuccessorPayloadText(args: {
 export function buildReferenceReadback(args: {
   readonly header: string
   readonly diagLine: string
+  readonly baselineLine?: string
   readonly provenanceLine: string
   readonly generationLine: string
   readonly seedSizeLine: string
+  readonly accessNote?: string
   readonly originalPrompt: string | undefined
   readonly originalNote: string
   readonly handover: string
   readonly successorMarker: string
 }): string {
+  const head = [
+    args.header,
+    args.diagLine,
+    ...(args.baselineLine !== undefined ? [args.baselineLine] : []),
+    args.provenanceLine,
+    args.generationLine,
+    args.seedSizeLine,
+    ...(args.accessNote !== undefined ? [args.accessNote] : []),
+  ].join("\n")
   return (
-    `${args.header}\n${args.diagLine}\n${args.provenanceLine}\n${args.generationLine}\n${args.seedSizeLine}\n\n` +
+    `${head}\n\n` +
     buildSuccessorPayloadText(args)
   )
 }
@@ -539,7 +662,7 @@ export function buildReferenceReadback(args: {
 export function buildLockedChildReply(agentId: string, provenance?: SpawnProvenance): string {
   return (
     `${CHILD_SUMMARY_PREFIX} This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
-    `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the full handover. ` +
+    `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the handover (compact by default; pass full:true for full texts; recorded successors receive full automatically). ` +
     `${READ_BEFORE_DECISION} ` +
     `Then start a successor of the same agent type ${formatAgentTypeReadback(provenance?.agentType)} ` +
     `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)} ` +

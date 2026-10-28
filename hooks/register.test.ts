@@ -34,6 +34,8 @@ import {
   type OriginalRecord,
 } from "./child.ts"
 import { HANDOVER_SECTIONS } from "../source/shared/handover-text.ts"
+import { HANDOVER_DESCRIPTION } from "../source/text.ts"
+import { SEED_FRAMING } from "../source/shared/handover-text.ts"
 import { seedTooLarge } from "../source/measure.ts"
 import { seedTooLarge as sharedSeedTooLarge } from "../source/shared/seed-size.ts"
 
@@ -402,7 +404,10 @@ describe("claude child adapter registration", () => {
     assert.match(intro, /before the handover is stored, writing plugin storage is allowed under read-only task instructions/i)
     assert.match(intro, /After the handover is stored, call only SubagentHandback and stop/)
     assert.match(intro, /auto-context-handover:continue child:/)
-    assert.match(intro, /receives the full handover intact via mcp__auto-context-handover__read_handover/)
+    assert.match(intro, /"full":true/)
+    assert.match(intro, /successor pointer always requests full:true/)
+    assert.match(intro, /compact view/)
+    assert.match(intro, /recorded successors receive full automatically/)
     assert.match(intro, /continues the work/)
   })
 
@@ -430,7 +435,8 @@ describe("claude child adapter registration", () => {
     assert.match(plain, /^Context handover \(incomplete\): almost done/)
     assert.match(plain, /NOT complete/)
     assert.match(plain, /rollover/)
-    assert.match(plain, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the full handover/)
+    assert.match(plain, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the handover/)
+    assert.match(plain, /compact by default; pass full:true for full texts; recorded successors receive full automatically/)
     assert.ok(plain.includes(READ_BEFORE_DECISION))
     assert.match(plain, /start a successor of the same agent type/)
     assert.match(plain, /same model override/)
@@ -796,7 +802,8 @@ describe("context_handover tool", () => {
     assert.match(text, /a1/)
     assert.match(text, /mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\)/)
     assert.match(text, /same agent type/)
-    assert.match(text, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the full handover/)
+    assert.match(text, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the handover/)
+    assert.match(text, /compact by default; pass full:true/)
     assert.ok(text.includes(READ_BEFORE_DECISION))
     assert.match(text, /Prioritized next steps/)
     assert.ok(!text.includes("[auto-context-handover:continue"))
@@ -1043,12 +1050,26 @@ describe("read_handover tool", () => {
   it("serves a parent read with no calling loop id via childId", async () => {
     const fake = makeFake()
     setup(fake)
-    await handOver(fake, "a1", "verbatim body here")
+    await handOver(fake, "a1", "1. Original instructions\n2. Completed work\n3. In-progress work\n4. Key snippets\n5. Negative knowledge\n6. Prioritized next steps\n1. do compact\n")
     const read = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "a1" })
     const text = String(read.result)
-    assert.match(text, /verbatim body here/)
-    assert.match(text, /a1/)
+    // Compact default: headers plus excerpt and pointer, full texts withheld.
+    assert.match(text, /Handover from subagent a1/)
+    assert.match(text, /Diagnostics:/)
+    assert.match(text, /Baseline:/)
+    assert.match(text, /Chain:/)
+    assert.match(text, /Seed size:/)
+    assert.match(text, /User decisions pending: unknown/)
+    assert.match(text, /Prioritized next steps \(excerpt, continue here\):/)
+    assert.match(text, /1\. do compact/)
+    assert.match(text, /Successor pointer/)
+    assert.match(text, /Compact view: full original task and handover withheld/)
+    assert.ok(!text.includes("verbatim body here"))
+    assert.ok(!text.includes("--- handover (VERBATIM"))
     assert.ok(!text.includes("continued in session"))
+    const full = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "a1", full: true })).result)
+    assert.ok(full.includes("1. do compact"))
+    assert.match(full, /VERBATIM, do not paraphrase/)
   })
 
   it("denies a handed-over child reading its own record", async () => {
@@ -1234,7 +1255,8 @@ describe("locked follow-up, honest status, and diagnostics", () => {
   it("uses the marker workflow for locked replies with or without provenance", async () => {
     for (const reply of [buildLockedChildReply("a1"), buildLockedChildReply("a1", { agentType: "Explore", modelOverride: "opus" })]) {
       assert.match(reply, /locked after a context handover/)
-      assert.match(reply, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the full handover/)
+      assert.match(reply, /First call mcp__auto-context-handover__read_handover\(\{"childId":"a1"\}\) to read the handover/)
+      assert.match(reply, /compact by default; pass full:true/)
       assert.ok(reply.includes(READ_BEFORE_DECISION))
       assert.match(reply, /start a successor of the same agent type/)
       assert.match(reply, /same model override/)
@@ -1265,6 +1287,12 @@ describe("locked follow-up, honest status, and diagnostics", () => {
     const fake = makeFake({ soft: 100 })
     setup(fake)
     fake.agents = childAgents("a1")
+    const startHook = only(fake, "classic.SubagentStart") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    await startHook(fake.$, { agent_id: "a1", agent_type: "general-purpose" }, async () => ({}))
     await runStep(fake, { agentId: "a1", turnId: "t1" }, { input_tokens: 90, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, model: "m" })
     assert.deepEqual((await batch(fake, { agent_id: "a1", session_id: "s" })).additionalContext, [buildClaudeChildNudge("warn1")])
     await handOver(fake, "a1", "tiny payload that must not set the estimate")
@@ -1275,7 +1303,11 @@ describe("locked follow-up, honest status, and diagnostics", () => {
     assert.equal(stored.diag?.soft, 100)
     const read = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "a1" })
     assert.match(String(read.result), /Diagnostics: reason=nudged, stage=warn1, estimated-context-tokens=100, soft-limit=100/)
-    assert.match(String(read.result), /tiny payload/)
+    assert.match(String(read.result), /Baseline: start-context-tokens=100, last-batch-increase=unknown/)
+    assert.ok(!String(read.result).includes("tiny payload that must not set the estimate"))
+    assert.match(String(read.result), /Prioritized next steps: unknown/)
+    const full = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "a1", full: true })).result)
+    assert.ok(full.includes("tiny payload that must not set the estimate"))
   })
 
   it("leaves over-limit usage before the first batch as not-nudged", async () => {
@@ -1465,10 +1497,15 @@ describe("locked follow-up, honest status, and diagnostics", () => {
     assert.equal((reload.store.get("child:a2") as ChildRecord).diag?.estimate, "unknown")
     const read = await toolCall(reload, { tool: READ_FULL, tool_use_id: "r1", childId: "a2" })
     assert.match(String(read.result), /Diagnostics: reason=unknown, stage=unknown, estimated-context-tokens=unknown, soft-limit=100/)
+    assert.match(String(read.result), /Baseline: start-context-tokens=unknown, last-batch-increase=unknown/)
+    assert.ok(!String(read.result).includes("after reload"))
+    assert.match(String((await toolCall(reload, { tool: READ_FULL, tool_use_id: "r3", childId: "a2", full: true })).result), /after reload/)
     reload.store.set("child:legacy", { handover: "legacy body", summary: "s", agentId: "legacy", shortReply: "Context handover (incomplete): s", closed: true, storedAt: 1 })
     const legacyRead = await toolCall(reload, { tool: READ_FULL, tool_use_id: "r2", childId: "legacy" })
-    assert.match(String(legacyRead.result), /legacy body/)
+    assert.ok(!String(legacyRead.result).includes("legacy body"))
+    assert.match(String(legacyRead.result), /Prioritized next steps: unknown/)
     assert.match(String(legacyRead.result), /Diagnostics: reason=unknown, stage=unknown, estimated-context-tokens=unknown, soft-limit=unknown/)
+    assert.match(String((await toolCall(reload, { tool: READ_FULL, tool_use_id: "r4", childId: "legacy", full: true })).result), /legacy body/)
   })
 })
 
@@ -1779,13 +1816,40 @@ describe("claude short reply and summary rule", () => {
     assert.ok(CHILD_HANDOVER_DESCRIPTION.includes('User decisions pending: <list>'))
     assert.ok(!CHILD_HANDOVER_DESCRIPTION.includes('never fabricate'))
     assert.ok(!HANDOVER_SECTIONS.includes('User decisions pending'))
-    // Code never synthesizes a pending-none line for missing/legacy summaries.
+    // Code never synthesizes a pending-none line for missing/legacy summaries:
+    // the compact view reports an honest unknown with a full:true pointer.
     const legacy = makeFake()
     setup(legacy)
     legacy.store.set("child:old", { handover: "old body", summary: "", agentId: "old", shortReply: "Context handover (incomplete): handover stored.", closed: true, storedAt: 1 })
     legacy.agents = childAgents("old")
     const read = await toolCall(legacy, { tool: READ_FULL, tool_use_id: "r1", childId: "old" })
-    assert.ok(!String(read.result).includes('User decisions pending'))
+    assert.match(String(read.result), /User decisions pending: unknown \(no pending line in summary; request full:true to check\)/)
+    assert.ok(!String(read.result).includes('User decisions pending: none'))
+    const pending = makeFake()
+    setup(pending)
+    pending.store.set("child:p1", { handover: "6. Prioritized next steps\n1. do x\n", summary: "did x\nUser decisions pending: need API choice", agentId: "p1", shortReply: "Context handover (incomplete): did x", closed: true, storedAt: 1 })
+    const pendingRead = await toolCall(pending, { tool: READ_FULL, tool_use_id: "r2", childId: "p1" })
+    assert.match(String(pendingRead.result), /User decisions pending: need API choice/)
+    // Inline single-line marker: pending content is not dropped.
+    const inline = makeFake()
+    setup(inline)
+    inline.store.set("child:i1", { handover: "6. Prioritized next steps\n1. do x\n", summary: "did work; User decisions pending: need API choice", agentId: "i1", shortReply: "Context handover (incomplete): did work", closed: true, storedAt: 1 })
+    assert.match(String((await toolCall(inline, { tool: READ_FULL, tool_use_id: "r1", childId: "i1" })).result), /User decisions pending: need API choice/)
+    // List continuation under a bare marker: items joined, never invented.
+    const listed = makeFake()
+    setup(listed)
+    listed.store.set("child:l1", { handover: "6. Prioritized next steps\n1. do x\n", summary: "did work\nUser decisions pending:\n- API choice\n- deadline", agentId: "l1", shortReply: "Context handover (incomplete): did work", closed: true, storedAt: 1 })
+    const listedRead = String((await toolCall(listed, { tool: READ_FULL, tool_use_id: "r1", childId: "l1" })).result)
+    assert.ok(listedRead.includes("API choice"))
+    assert.ok(listedRead.includes("deadline"))
+    // Hybrid head plus following lines: all preserved, none dropped.
+    const hybrid = makeFake()
+    setup(hybrid)
+    hybrid.store.set("child:h1", { handover: "6. Prioritized next steps\n1. do x\n", summary: "did work\nUser decisions pending: need API choice\n- deadline\n- owner", agentId: "h1", shortReply: "Context handover (incomplete): did work", closed: true, storedAt: 1 })
+    const hybridRead = String((await toolCall(hybrid, { tool: READ_FULL, tool_use_id: "r1", childId: "h1" })).result)
+    assert.ok(hybridRead.includes("need API choice"))
+    assert.ok(hybridRead.includes("deadline"))
+    assert.ok(hybridRead.includes("owner"))
   })
 })
 
@@ -1946,7 +2010,11 @@ describe("handback delivery contract", () => {
     const body = "1. Original instructions\n2. Completed work\n6. Prioritized next steps\n1. Read the next file\n2. Build the table\n"
     await runStep(fake, { agentId: "c1" }, { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c1", handover: body, summary: "s" })
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "c1" })).result)
+    // Compact default withholds the full texts; explicit full:true serves reference.
+    const compact = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "c1" })).result)
+    assert.ok(!compact.includes(body))
+    assert.match(compact, /Compact view: full original task and handover withheld/)
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "c1", full: true })).result)
     assert.match(read, /VERBATIM, do not paraphrase/)
     assert.match(read, /Prioritized next steps/)
     assert.match(read, /same agent type \(recorded: unknown/)
@@ -1976,7 +2044,7 @@ describe("handback delivery contract", () => {
       const seed = buildClaudeSuccessorSeed("c1", "body", provenance)
       assert.equal(seed.split("\n")[0], `Continuing work handed over from subagent c1 (${expected}).`)
       assert.match(seed, /Original task: reference only/)
-      assert.match(seed, new RegExp(`read_handover\\(\\{"childId":"c1"\\}\\)`))
+      assert.match(seed, new RegExp(`read_handover\\(\\{"childId":"c1","full":true\\}\\)`))
       assert.ok(!seed.includes("[paste the original task prompt here]"))
       assert.ok(!seed.includes("section 6"))
       assert.match(seed, /--- handover from subagent c1 \(VERBATIM, do not paraphrase\) ---/)
@@ -1989,7 +2057,9 @@ describe("handback delivery contract", () => {
 
   it("keeps the root fallback context-only with read-before-message and marker rules", async () => {
     const intro = buildClaudeRootIntro()
-    assert.ok(intro.includes('When a subagent returns a "Context handover (incomplete):" reply, read the full handover'))
+    assert.ok(intro.includes('When a subagent returns a "Context handover (incomplete):" reply, read the handover'))
+    assert.ok(intro.includes('compact parent view by default'))
+    assert.ok(intro.includes('pass full:true for the full original task and handover verbatim'))
     assert.ok(intro.includes('a stored handover counts as a reply. Never SendMessage'))
     assert.match(intro, /call mcp__auto-context-handover__read_handover with its child id BEFORE messaging or resuming/)
     assert.match(intro, /Never SendMessage to or resume a handed-over subagent/)
@@ -2060,8 +2130,10 @@ describe("reference lineage: marker, originals, generations", () => {
     assert.equal(gen2.generation, 2)
     assert.equal(gen2.predecessorAgentId, "g1")
     assert.equal(gen2.originAgentId, "g1")
-    // Readback supplies the original verbatim once and the handover verbatim once.
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "g2" })).result)
+    // Readback supplies the original verbatim once and the handover verbatim once (explicit full:true; compact withholds).
+    const compactGen2 = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "g2" })).result)
+    assert.ok(!compactGen2.includes(original))
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "g2", full: true })).result)
     assert.match(read, /generation 2/)
     assert.match(read, /predecessor g1/)
     assert.match(read, /\(origin: g1\)/)
@@ -2119,7 +2191,9 @@ describe("reference lineage: marker, originals, generations", () => {
     assert.equal(stored.handover, handoverBody(["read a"]))
     // Standalone metadata persisted despite the already-closed record.
     assert.deepEqual(fake.store.get("spawn:race1"), { agentType: "general-purpose", modelOverride: null, originAgentId: "race1", generation: 1 })
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "race1" })).result)
+    const compactRace = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "race1" })).result)
+    assert.ok(!compactRace.includes(original))
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "race1", full: true })).result)
     assert.match(read, /generation 1/)
     assert.match(read, /\(origin: race1\)/)
     assert.equal(read.split(original).length - 1, 1)
@@ -2145,7 +2219,9 @@ describe("reference lineage: marker, originals, generations", () => {
     })
     // The handover ran before the spawn persistence, so the record itself lacks lineage.
     assert.equal((fake.store.get("child:g2") as ChildRecord).predecessorAgentId, undefined)
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "g2" })).result)
+    const compactRace2 = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "g2" })).result)
+    assert.ok(!compactRace2.includes(original))
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "g2", full: true })).result)
     assert.match(read, /generation 2/)
     assert.match(read, /predecessor g1/)
     assert.match(read, /\(origin: g1\)/)
@@ -2180,7 +2256,9 @@ describe("reference lineage: marker, originals, generations", () => {
     const spawnMeta = fake.store.get("spawn:q1") as { originalCaptureError?: string }
     assert.match(String(spawnMeta?.originalCaptureError ?? ""), /quota exceeded/)
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "q1", handover: handoverBody(["a"]), summary: "s" })
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "q1" })).result)
+    const compactQ = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "q1" })).result)
+    assert.ok(!compactQ.includes("quota exceeded"))
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "q1", full: true })).result)
     assert.match(read, /original capture failed/)
     assert.match(read, /quota exceeded/)
     assert.match(read, /\(origin: q1\)/)
@@ -2188,7 +2266,7 @@ describe("reference lineage: marker, originals, generations", () => {
     const reloaded = makeFake()
     for (const [key, value] of fake.store) reloaded.store.set(key, value)
     setup(reloaded)
-    const reread = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r2", childId: "q1" })).result)
+    const reread = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r2", childId: "q1", full: true })).result)
     assert.match(reread, /original capture failed/)
     assert.match(reread, /quota exceeded/)
     // When every write fails, the readback degrades honestly without the cause.
@@ -2215,7 +2293,7 @@ describe("reference lineage: marker, originals, generations", () => {
     await doomedHook(doomed.$, { subagentType: "Explore", prompt: "quota origin task" }, async () => ({ model: "m", agentId: "q9" }))
     doomed.$ = { ...doomed.$, store: doomedBacking } as Engine
     await toolCall(doomed, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "q9", handover: handoverBody(["a"]), summary: "s" })
-    const doomedRead = String((await toolCall(doomed, { tool: READ_FULL, tool_use_id: "r1", childId: "q9" })).result)
+    const doomedRead = String((await toolCall(doomed, { tool: READ_FULL, tool_use_id: "r1", childId: "q9", full: true })).result)
     assert.match(doomedRead, /has no stored original/)
   })
 
@@ -2225,7 +2303,10 @@ describe("reference lineage: marker, originals, generations", () => {
     fake.agents = [{ id: "c1", type: "general-purpose", status: "running" }]
     await spawn(fake, { subagentType: "general-purpose", prompt: "origin task" }, { model: "m", agentId: "c1" })
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c1", handover: handoverBody(["do a"]), summary: "s" })
-    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "c1" })).result)
+    const compactRef = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "c1" })).result)
+    assert.ok(!compactRef.includes("origin task"))
+    assert.match(compactRef, /Prioritized next steps \(excerpt/)
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "c1", full: true })).result)
     assert.match(read, /reference only/)
     assert.match(read, /must not be repeated/)
     assert.match(read, /trusted unless marked unverified/)
@@ -2235,8 +2316,9 @@ describe("reference lineage: marker, originals, generations", () => {
     assert.match(read, /SubagentHandback/)
     const pointer = buildSuccessorPointer("c1")
     assert.ok(pointer.startsWith(buildSuccessorMarker("c1")))
+    assert.ok(pointer.includes(`read_handover({"childId":"c1","full":true})`))
     assert.ok(read.includes(pointer))
-    assert.ok(read.indexOf(buildSuccessorMarker("c1")) < read.indexOf(`read_handover({"childId":"c1"})`))
+    assert.ok(read.indexOf(buildSuccessorMarker("c1")) < read.indexOf(`read_handover({"childId":"c1","full":true})`))
     assert.ok(!pointer.includes("You may append"))
     assert.ok(!pointer.includes("Spawn with"))
   })
@@ -2270,12 +2352,12 @@ describe("reference lineage: marker, originals, generations", () => {
     const gen2 = second.store.get("child:r2") as ChildRecord
     assert.equal(gen2.generation, 2)
     assert.equal(gen2.originAgentId, "r1")
-    const read = String((await toolCall(second, { tool: READ_FULL, tool_use_id: "r1", childId: "r2" })).result)
+    const read = String((await toolCall(second, { tool: READ_FULL, tool_use_id: "r1", childId: "r2", full: true })).result)
     assert.ok(read.includes("origin prompt text"))
     assert.match(read, /generation 2/)
     // Original read outage degrades honestly with quota wording, never fabricated.
     second.readFailKeys.add(originalRecordKey("r1"))
-    const outage = String((await toolCall(second, { tool: READ_FULL, tool_use_id: "r2", childId: "r2" })).result)
+    const outage = String((await toolCall(second, { tool: READ_FULL, tool_use_id: "r2", childId: "r2", full: true })).result)
     assert.match(outage, /unknown/)
     assert.ok(!outage.includes("origin prompt text"))
   })
@@ -2365,7 +2447,9 @@ describe("next-step count, seed size, and generation lines", () => {
     const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "big" })).result)
     assert.match(read, /over 50%/)
     assert.match(read, /compress carried-over finished notes/)
-    assert.equal(read.split(big).length - 1, 1)
+    const excerptBody = big.split("\n").slice(1).join("\n").trim()
+    assert.equal(read.split(excerptBody).length - 1, 1)
+    assert.ok(!read.includes("6. Prioritized next steps"))
   })
 
   it("formats the generation line honestly for known and unknown lineage", () => {
@@ -2427,7 +2511,7 @@ describe("pending corrections: pointer prefix, raced lineage, and prompt reuse",
     for (const [key, value] of fake.store) reloaded.store.set(key, value)
     reloaded.agents = [{ id: "e1", type: "general-purpose", status: "running" }, { id: "e2", type: "general-purpose", status: "running" }, { id: "e3", type: "general-purpose", status: "running" }]
     setup(reloaded)
-    const reread = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r2", childId: "e2" })).result)
+    const reread = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r2", childId: "e2", full: true })).result)
     assert.ok(reread.includes(buildSuccessorPointer("e2")))
     assert.equal(reread.split(original).length - 1, 1)
     await spawnFor(reloaded, { subagentType: "general-purpose", prompt: `${buildSuccessorPointer("e2")} keep going` }, { model: "m", agentId: "e3" })
@@ -2435,7 +2519,7 @@ describe("pending corrections: pointer prefix, raced lineage, and prompt reuse",
     const gen3 = reloaded.store.get("child:e3") as ChildRecord
     assert.equal(gen3.generation, 3)
     assert.equal(gen3.originAgentId, "e1")
-    const read3 = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r3", childId: "e3" })).result)
+    const read3 = String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r3", childId: "e3", full: true })).result)
     assert.equal(read3.split(original).length - 1, 1)
     assert.match(read3, /generation 3/)
   })
@@ -2478,6 +2562,263 @@ describe("pending corrections: pointer prefix, raced lineage, and prompt reuse",
     const gen3 = reloaded.store.get("child:o4") as ChildRecord
     assert.equal(gen3.originAgentId, "o1")
     assert.equal(gen3.generation, 3)
-    assert.equal(String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r4", childId: "o4" })).result).split(original).length - 1, 1)
+    assert.equal(String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r4", childId: "o4", full: true })).result).split(original).length - 1, 1)
+  })
+})
+
+describe("compact default, full:true, and successor auto-full", () => {
+  const handoverBody = (steps: string[]): string =>
+    `1. Original instructions\n2. Completed work\n3. In-progress work\n4. Key snippets\n5. Negative knowledge\n6. Prioritized next steps\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n`
+
+  it("withholds full texts by default and serves them once with full:true", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = [{ id: "k1", type: "general-purpose", status: "running" }]
+    await toolCall(fake, { tool: READ_FULL, tool_use_id: "r0", childId: "k1" })
+    const body = handoverBody(["do the thing"])
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "k1", handover: body, summary: "User decisions pending: none" })
+    const compact = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "k1" })).result)
+    assert.match(compact, /Handover from subagent k1/)
+    assert.match(compact, /Diagnostics:/)
+    assert.match(compact, /Baseline:/)
+    assert.match(compact, /Chain:/)
+    assert.match(compact, /Seed size:/)
+    assert.match(compact, /User decisions pending: none/)
+    assert.match(compact, /Prioritized next steps \(excerpt, continue here\):/)
+    assert.match(compact, /Prioritized next steps \(excerpt, continue here\):\n1\. do the thing/)
+    assert.ok(!compact.includes("6. Prioritized next steps"))
+    assert.ok(compact.includes("do the thing"))
+    assert.ok(!compact.includes("--- handover (VERBATIM"))
+    assert.ok(!compact.includes("--- original task"))
+    assert.match(compact, /Compact view: full original task and handover withheld/)
+    const full = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "k1", full: true })).result)
+    assert.match(full, /Full-access: explicit full:true request/)
+    assert.ok(full.includes(body))
+    assert.equal(full.split(body).length - 1, 1)
+  })
+
+  it("auto-serves full to the recorded successor while unrelated callers stay compact", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = [{ id: "s1", type: "general-purpose", status: "running" }]
+    const spawn = only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    await spawn(fake.$, { subagentType: "general-purpose", prompt: "root origin" }, async () => ({ model: "m", agentId: "s1" }))
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "s1", handover: handoverBody(["first"]), summary: "s" })
+    fake.agents = [...fake.agents, { id: "s2", type: "general-purpose", status: "running" }, { id: "other", type: "general-purpose", status: "running" }]
+    await spawn(fake.$, { subagentType: "general-purpose", prompt: `${buildSuccessorMarker("s1")} go` }, async () => ({ model: "m", agentId: "s2" }))
+    // Recorded successor (leading marker/stored predecessor link) receives full automatically.
+    const succ = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", agentId: "s2", childId: "s1" })).result)
+    assert.match(succ, /Full-access: caller s2 is the recorded successor/)
+    assert.ok(succ.includes("root origin"))
+    assert.ok(succ.includes(handoverBody(["first"])))
+    // Unrelated live caller stays compact without auth failure.
+    const parent = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", agentId: "other", childId: "s1" })).result)
+    assert.ok(!parent.includes("root origin"))
+    assert.ok(!parent.includes("--- handover (VERBATIM"))
+    assert.match(parent, /Compact view/)
+    // Open reader: parent with no calling loop id also reads compact.
+    const open = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r3", childId: "s1" })).result)
+    assert.ok(!open.includes("root origin"))
+    assert.match(open, /Successor pointer/)
+  })
+
+  it("serves pointer-directed full:true reads before spawn return; unflagged unrelated reads stay compact", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = [{ id: "f1", type: "general-purpose", status: "running" }]
+    const spawn = only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>
+    await spawn(fake.$, { subagentType: "general-purpose", prompt: "fast origin" }, async () => ({ model: "m", agentId: "f1" }))
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "f1", handover: handoverBody(["a"]), summary: "s" })
+    // The generated pointer always requests full:true.
+    const pointer = buildSuccessorPointer("f1")
+    assert.ok(pointer.includes(`read_handover({"childId":"f1","full":true})`))
+    fake.agents = [...fake.agents, { id: "f2", type: "general-purpose", status: "running" }, { id: "other", type: "general-purpose", status: "running" }]
+    let pointerDirected = ""
+    await (only(fake, "agent.spawn") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => Promise<Record<string, unknown>>)(fake.$, { subagentType: "general-purpose", prompt: `${pointer} go` }, async () => {
+      // Fast child follows the pointer exactly (full:true) before the spawn hook persists its predecessor link.
+      pointerDirected = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "rx", agentId: "f2", childId: "f1", full: true })).result)
+      return { model: "m", agentId: "f2" }
+    })
+    assert.match(pointerDirected, /Full-access: explicit full:true request/)
+    assert.ok(pointerDirected.includes("fast origin"))
+    // After persistence the recorded successor also auto-fulls without the flag.
+    const after = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", agentId: "f2", childId: "f1" })).result)
+    assert.match(after, /Full-access: caller f2 is the recorded successor/)
+    assert.ok(after.includes("fast origin"))
+    // An unrelated caller without the flag still receives the compact view.
+    const unrelated = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", agentId: "other", childId: "f1" })).result)
+    assert.ok(!unrelated.includes("fast origin"))
+    assert.match(unrelated, /Compact view/)
+  })
+
+  it("reports ambiguous next steps and missing pending lines honestly with a full:true pointer", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("amb")
+    const ambiguous = "1. Original\n2. Done\n6. Prioritized next steps\n1. Do A\nSome prose\n2. Do B\n"
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "amb", handover: ambiguous, summary: "no pending line here" })
+    const read = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "amb" })).result)
+    assert.match(read, /Prioritized next steps: unknown \(could not extract; request full:true/)
+    assert.match(read, /User decisions pending: unknown \(no pending line in summary; request full:true to check\)/)
+    assert.ok(!read.includes(ambiguous))
+    const full = String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r2", childId: "amb", full: true })).result)
+    assert.ok(full.includes(ambiguous))
+  })
+
+  it("tracks baseline on first measurement, growth on the second, and unknown after invalid or reload", async () => {
+    const startChild = async (f: Fake, id: string): Promise<void> => {
+      const hook = only(f, "classic.SubagentStart") as unknown as (
+        $: Engine,
+        event: Record<string, unknown>,
+        next: (event: Record<string, unknown>) => Promise<Record<string, unknown>>,
+      ) => Promise<Record<string, unknown>>
+      await hook(f.$, { agent_id: id, agent_type: "general-purpose" }, async () => ({}))
+    }
+    // Normal observed start: first measured request baselines, second grows.
+    const fake = makeFake({ soft: 1000 })
+    setup(fake)
+    fake.agents = childAgents("b1")
+    await startChild(fake, "b1")
+    await runStep(fake, { agentId: "b1", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(fake, { agentId: "b1", turnId: "t2" }, { input_tokens: 500, output_tokens: 10, cache_read_input_tokens: 5, cache_creation_input_tokens: 5, model: "m" })
+    await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "b1", handover: handoverBody(["x"]), summary: "s" })
+    const stored = fake.store.get("child:b1") as ChildRecord
+    assert.equal((stored.diag as { baseline?: unknown }).baseline, 400)
+    assert.equal((stored.diag as { growth?: unknown }).growth, 120)
+    assert.match(String((await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "b1", full: true })).result), /Baseline: start-context-tokens=400, last-batch-increase=120\./)
+    // Resume does not reset the seen baseline: a second start keeps it.
+    const res = makeFake({ soft: 1000 })
+    setup(res)
+    res.agents = childAgents("r1")
+    await startChild(res, "r1")
+    await runStep(res, { agentId: "r1", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await startChild(res, "r1")
+    await runStep(res, { agentId: "r1", turnId: "t2" }, { input_tokens: 520, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await toolCall(res, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "r1", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(res, { tool: READ_FULL, tool_use_id: "r1", childId: "r1", full: true })).result), /Baseline: start-context-tokens=400, last-batch-increase=120\./)
+    // Legacy/unobserved: no start observed, so baseline stays unknown even
+    // with two consecutive measurements; growth still tracks the delta.
+    const legacy = makeFake({ soft: 1000 })
+    setup(legacy)
+    legacy.agents = childAgents("u1")
+    await runStep(legacy, { agentId: "u1", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(legacy, { agentId: "u1", turnId: "t2" }, { input_tokens: 520, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await toolCall(legacy, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "u1", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(legacy, { tool: READ_FULL, tool_use_id: "r1", childId: "u1", full: true })).result), /Baseline: start-context-tokens=unknown, last-batch-increase=120\./)
+    // Reload then fresh consecutive measurements: first post-reload total
+    // must not invent a start; growth stays valid.
+    const first = makeFake({ soft: 1000 })
+    setup(first)
+    first.agents = childAgents("c1")
+    await startChild(first, "c1")
+    await runStep(first, { agentId: "c1", turnId: "t1" }, { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    const second = makeFake({ soft: 1000 })
+    for (const [key, value] of first.store) second.store.set(key, value)
+    setup(second)
+    second.agents = childAgents("c1")
+    await startChild(second, "c1")
+    await runStep(second, { agentId: "c1", turnId: "t1" }, { input_tokens: 4000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(second, { agentId: "c1", turnId: "t2" }, { input_tokens: 4500, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await toolCall(second, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c1", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(second, { tool: READ_FULL, tool_use_id: "r1", childId: "c1", full: true })).result), /Baseline: start-context-tokens=unknown, last-batch-increase=500\./)
+    // A failed launch-metadata lookup cannot establish a fresh baseline.
+    for (const key of ["child:outage", "spawn:outage"]) {
+      const outage = makeFake({ soft: 1000 })
+      setup(outage)
+      outage.agents = childAgents("outage")
+      outage.readFailKeys.add(key)
+      await startChild(outage, "outage")
+      outage.readFailKeys.clear()
+      await runStep(outage, { agentId: "outage", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+      await toolCall(outage, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "outage", handover: handoverBody(["x"]), summary: "s" })
+      assert.match(String((await toolCall(outage, { tool: READ_FULL, tool_use_id: "r1", childId: "outage" })).result), /Baseline: start-context-tokens=unknown, last-batch-increase=unknown\./)
+    }
+    // Invalid usage clears the last value so growth degrades honestly.
+    const invalid = makeFake({ soft: 1000 })
+    setup(invalid)
+    invalid.agents = childAgents("b2")
+    await startChild(invalid, "b2")
+    await runStep(invalid, { agentId: "b2", turnId: "t1" }, { input_tokens: 400, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(invalid, { agentId: "b2", turnId: "t2" }, null)
+    await toolCall(invalid, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "b2", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(invalid, { tool: READ_FULL, tool_use_id: "r1", childId: "b2", full: true })).result), /Baseline: start-context-tokens=400, last-batch-increase=unknown\./)
+    // Compaction can shrink the per-request total: negative deltas retained.
+    const compact = makeFake({ soft: 1000 })
+    setup(compact)
+    compact.agents = childAgents("n1")
+    await startChild(compact, "n1")
+    await runStep(compact, { agentId: "n1", turnId: "t1" }, { input_tokens: 500, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await runStep(compact, { agentId: "n1", turnId: "t2" }, { input_tokens: 300, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "m" })
+    await toolCall(compact, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "n1", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(compact, { tool: READ_FULL, tool_use_id: "r1", childId: "n1", full: true })).result), /Baseline: start-context-tokens=500, last-batch-increase=-200\./)
+    // Reload loses in-memory baseline/growth.
+    const reloaded = makeFake()
+    setup(reloaded)
+    reloaded.agents = childAgents("b3")
+    await toolCall(reloaded, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "b3", handover: handoverBody(["x"]), summary: "s" })
+    assert.match(String((await toolCall(reloaded, { tool: READ_FULL, tool_use_id: "r1", childId: "b3" })).result), /Baseline: start-context-tokens=unknown, last-batch-increase=unknown\./)
+  })
+
+  it("guards the pre-dispatch catch when next.error is absent", async () => {
+    const fake = makeFake()
+    setup(fake)
+    await handOver(fake, "g1", "body")
+    const handler = fake.catches.get("tool.call")
+    assert.ok(handler)
+    const seen: Array<Record<string, unknown>> = []
+    const event = { tool: "Bash", agentId: "g1" }
+    const next = Object.assign(
+      (input: Record<string, unknown>): Promise<unknown> => {
+        seen.push(input)
+        return Promise.resolve({ result: "must not run" })
+      },
+      { called: false },
+    )
+    const noHost = new Proxy(fake.$, { get: () => { throw new Error("catch handlers must not access the host") } })
+    const outcome = await handler(noHost, event, next as never) as { deny?: string }
+    assert.match(String(outcome.deny), /before dispatch \(unknown\)/)
+    assert.deepEqual(seen, [])
+  })
+})
+
+describe("shared wording across both adapters", () => {
+  it("keeps six numbered sections with no self-provenance request and honest history gaps", () => {
+    for (const title of ["1. Original instructions", "2. Completed work", "3. In-progress work", "4. Key snippets", "5. Negative knowledge", "6. Prioritized next steps"]) {
+      assert.ok(HANDOVER_SECTIONS.includes(title), `shared sections keep ${title}`)
+    }
+    assert.ok(!HANDOVER_SECTIONS.includes("agent, provider/model/variant"))
+    assert.ok(!HANDOVER_SECTIONS.includes("provider/model"))
+    assert.ok(!HANDOVER_SECTIONS.includes("session ID chain"))
+    assert.ok(!HANDOVER_SECTIONS.includes("predecessor session"))
+    assert.ok(HANDOVER_SECTIONS.includes("permissions/tool restrictions"))
+    assert.ok(HANDOVER_SECTIONS.includes("flag history gaps"))
+    assert.ok(HANDOVER_SECTIONS.includes("Do not describe your own agent type, model (including override), or chain"))
+    assert.ok(HANDOVER_SECTIONS.includes("Keep open questions explicitly"))
+    // Both adapters carry the shared text byte-for-byte.
+    assert.ok(CHILD_HANDOVER_DESCRIPTION.includes(HANDOVER_SECTIONS))
+    assert.ok(HANDOVER_DESCRIPTION.includes(HANDOVER_SECTIONS))
+    assert.ok(HANDOVER_DESCRIPTION.includes("Do not describe your own agent type, model (including override), or chain"))
+  })
+
+  it("frames targeted rereads in both seeds without repeating completed work", () => {
+    assert.ok(SEED_FRAMING.includes("Targeted rereads of already-covered material are allowed only to resolve open questions"))
+    assert.ok(SEED_FRAMING.includes("never repeat completed steps"))
+    assert.ok(SEED_FRAMING.includes("Continue from 'Prioritized next steps'"))
+    assert.ok(HANDOVER_DESCRIPTION.includes("Targeted rereads of already-covered material are allowed only to resolve open questions"))
+    assert.ok(CHILD_HANDOVER_DESCRIPTION.includes(HANDOVER_SECTIONS))
+    assert.ok(buildClaudeRootIntro().includes("targeted rereads are allowed only to resolve open questions"))
+    assert.ok(buildClaudeChildIntro().includes("targeted rereads are allowed only to resolve open questions"))
   })
 })

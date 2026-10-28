@@ -200,6 +200,14 @@ describe("auto-context-handover harness", () => {
     ))
   })
 
+  it("registers the read tool with an explicit open-reader description", async () => {
+    const fake = makeFake({})
+    await setup(fake)
+    const tool = fake.tools.get("read_handover") as unknown as { description?: unknown }
+    assert.match(String(tool.description), /any live caller can read any stored handover/)
+    assert.match(String(tool.description), /no caller authorization, open policy/)
+  })
+
   it("replaces the handover description fully with custom text", async () => {
     const fake = makeFake({ handoverDescription: "custom desc" })
     await setup(fake)

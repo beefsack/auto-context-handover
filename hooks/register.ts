@@ -30,14 +30,17 @@ import type {
   TurnStepResult,
 } from "./claude-types.ts"
 import {
+  buildBaselineLine,
   buildChildShortReply,
   buildClaudeChildIntro,
   buildClaudeChildNudge,
   buildClaudeRootIntro,
+  buildCompactReadback,
   buildGenerationLine,
   buildHandoverStoredInstruction,
   buildLockedChildDeny,
   buildLockedChildReply,
+  buildPendingLine,
   buildProvenanceReadback,
   buildReferenceReadback,
   buildSeedSizeLine,
@@ -51,6 +54,7 @@ import {
   classifySuccessorMarker,
   countNextSteps,
   estimateSeedTokens,
+  extractNextStepsSection,
   formatHandbackDeliveredValue,
   formatOriginReadback,
   HANDOVER_FULL,
@@ -86,10 +90,12 @@ const HANDOVER_SCHEMA = {
 
 // Reserved host identity (ToolCallEvent.agentId) is never a user argument:
 // the read target is childId, supplied by the calling (parent) loop.
+// Optional full:true returns full verbatim texts; default is compact.
 const READ_SCHEMA = {
   type: "object",
   properties: {
     childId: { type: "string" },
+    full: { type: "boolean" },
   },
   required: ["childId"],
 } as Record<string, unknown>
@@ -182,6 +188,20 @@ export const register = (on: On, options?: RegisterOptions): void => {
   // Original-capture failures by origin id (actual store error text). Memory
   // only: after a reload the readback reports unknown capture status.
   const originalErrorSeen = new Map<string, string>()
+  // Baseline/start context (first measured per-request total) and last-batch
+  // increase (latest minus previous). In-memory only: reload loses them, so
+  // handover diagnostics degrade honestly to unknown. No pruning by design;
+  // retention matches the existing per-child Maps/Sets (known limitation).
+  // Baseline is eligible only for a newly observed launch in this
+  // registration: classic.SubagentStart for an id with no prior stored
+  // spawn/closed-child metadata and no previously loaded spawn metadata.
+  // Reload/mid-child/unobserved starts stay
+  // unknown; growth still tracks consecutive measurements. Resumes never
+  // reset an established baseline; turn.index is never a start signal.
+  const baselineSeen = new Map<string, number>()
+  const growthSeen = new Map<string, number>()
+  const baselineEligible = new Set<string>()
+  const spawnObservedHere = new Set<string>()
 
   on("session.start", async ($: Engine, event: unknown, next: (event: unknown) => Promise<unknown>) => {
     await $.tool.register({ name: HANDOVER_TOOL, description: CHILD_HANDOVER_DESCRIPTION, inputSchema: HANDOVER_SCHEMA })
@@ -254,6 +274,10 @@ export const register = (on: On, options?: RegisterOptions): void => {
       if (typeof record.deny === "string" && record.deny.length > 0) return result
       const childId = typeof record.agentId === "string" && record.agentId.length > 0 ? (record.agentId as string) : undefined
       if (childId === undefined) return result
+      // Launch observed in this registration via the spawn hook. Records a
+      // same-launch SubagentStart as newly observed even after this hook
+      // persists spawn metadata to the store.
+      spawnObservedHere.add(childId)
       const meta: SpawnProvenance = {
         ...(requestedType === undefined ? {} : { agentType: requestedType }),
         modelOverride: forked ? null : requestedOverride,
@@ -356,6 +380,22 @@ export const register = (on: On, options?: RegisterOptions): void => {
         teammate = false
       }
       if (teammate) return result
+      // Baseline eligibility: a newly observed launch in this registration
+      // only. Never resets an established baseline/eligibility (resumes run
+      // this hook again). Store outages stay unknown, never eligible.
+      if (!baselineEligible.has(agentId) && !baselineSeen.has(agentId)) {
+        try {
+          if (spawnObservedHere.has(agentId)) {
+            baselineEligible.add(agentId)
+          } else if (!spawnSeen.has(agentId)) {
+            const closed = await $.store.get(childRecordKey(agentId))
+            const stored = closed === undefined ? await $.store.get(spawnRecordKey(agentId)) : undefined
+            if (closed === undefined && stored === undefined) baselineEligible.add(agentId)
+          }
+        } catch {
+          // Fail closed: without proof of a new first observation, baseline stays unknown.
+        }
+      }
       const fallbackType = asString(event?.agent_type)
       if (fallbackType !== undefined && fallbackType !== "") {
         try {
@@ -423,13 +463,26 @@ export const register = (on: On, options?: RegisterOptions): void => {
       const total = sumTurnUsage(result?.usage)
       if (total === undefined) {
         usageCache.delete(agentId)
+        growthSeen.delete(agentId)
         return result
       }
       const child = await isChildLoop($, agentId).catch(() => false)
       if (!child) {
         usageCache.delete(agentId)
+        growthSeen.delete(agentId)
         return result
       }
+      // Baseline is the first measured per-request total after a newly
+      // observed launch in this registration; growth is the last batch
+      // increase (latest minus previous). Consecutive actual measurements
+      // only; invalid steps clear the last value so growth degrades to
+      // unknown instead of inventing a delta. Unobserved, mid-child, and
+      // reload measurements keep baseline unknown while growth still tracks
+      // consecutive totals (including negative compaction deltas).
+      const previous = usageCache.get(agentId)
+      if (baselineEligible.has(agentId) && !baselineSeen.has(agentId)) baselineSeen.set(agentId, total)
+      else if (previous !== undefined) growthSeen.set(agentId, total - previous)
+      else growthSeen.delete(agentId)
       usageCache.set(agentId, total)
     } catch {
       // Fail open: measurement or host failures leave the turn untouched.
@@ -527,14 +580,22 @@ export const register = (on: On, options?: RegisterOptions): void => {
         // usage alone: before any appended nudge a known usage is
         // not-nudged, and only an unknown snapshot (reload or invalid usage
         // without prior nudge) is unknown. Stage derives from the last
-        // estimate via softStage; unknown only when missing.
+        // estimate via softStage; unknown only when missing. Baseline is the
+        // first measured request; growth is the last batch increase
+        // (latest minus previous, consecutive measurements only).
+        // Baseline is unknown without a newly observed start; growth needs
+        // two consecutive measurements, including after a reload.
         const last = usageCache.get(agentId)
         const wasNudged = nudged.has(agentId)
+        const baseline = baselineSeen.get(agentId) ?? "unknown"
+        const growth = growthSeen.get(agentId) ?? "unknown"
         const diag: ChildDiag = {
           reason: wasNudged ? "nudged" : last === undefined ? "unknown" : "not-nudged",
           stage: last === undefined ? "unknown" : softStage(last, soft),
           estimate: last === undefined ? "unknown" : last,
           soft,
+          baseline,
+          growth,
         }
         // Spawn provenance: in-memory first, then the persisted spawn key
         // (reload), else unknown. Observed absent (null) stays distinct from
@@ -569,6 +630,9 @@ export const register = (on: On, options?: RegisterOptions): void => {
           return storageDeny("persisting handover", childRecordKey(agentId), error)
         }
         usageCache.delete(agentId)
+        baselineSeen.delete(agentId)
+        growthSeen.delete(agentId)
+        baselineEligible.delete(agentId)
         return { result: buildHandoverStoredInstruction(stored.shortReply) }
       } finally {
         inflight.delete(agentId)
@@ -651,6 +715,8 @@ export const register = (on: On, options?: RegisterOptions): void => {
       if (target === undefined || target === "") {
         return { deny: "auto-context-handover: read_handover needs a non-empty childId." }
       }
+      const wantFull = (call as Record<string, unknown>).full === true
+      const callerId = asString(call.agentId)
       let stored: ChildRecord | undefined
       try {
         stored = await readRecord($, target)
@@ -663,6 +729,12 @@ export const register = (on: On, options?: RegisterOptions): void => {
         (stored.parentSessionId ? ` (host session ${stored.parentSessionId})` : "") +
         ` stored at ${stored.storedAt}:`
       const diagLine = `${formatDiagLine(stored.diag)}, handback-delivered=${formatHandbackDeliveredValue((stored as ChildRecord).handbackDelivered)}`
+      const baselineValue = (stored.diag as ChildDiag | undefined)?.baseline
+      const growthValue = (stored.diag as ChildDiag | undefined)?.growth
+      const baselineLine = buildBaselineLine(
+        typeof baselineValue === "number" ? baselineValue : "unknown",
+        typeof growthValue === "number" ? growthValue : "unknown",
+      )
       // Reference workflow: generation/chain/next-step count, seed-size
       // diagnostics, then the original task verbatim once and the handover
       // verbatim once, plus successor guidance and the short successor
@@ -727,17 +799,66 @@ export const register = (on: On, options?: RegisterOptions): void => {
         successorMarker: successorPointer,
       }))
       const seedSizeLine = buildSeedSizeLine(seedEstimate, soft)
+      // Successor identification: a caller is a recorded successor when its
+      // merged provenance (closed record plus spawn metadata, memory first)
+      // links predecessorAgentId to this target. Exact mechanism: the
+      // successor spawned with a leading
+      // [auto-context-handover:continue child:<target>] marker, classified
+      // synchronously in agent.spawn and persisted as predecessor/origin/
+      // generation in spawn:<caller> and child:<caller>. Parent callers (no
+      // agentId) and unrelated loops are never successors.
+      let isSuccessor = false
+      if (callerId !== undefined && callerId !== "" && callerId !== target) {
+        try {
+          const callerRecord = await readRecord($, callerId).catch(() => undefined)
+          let callerSpawn = spawnSeen.get(callerId)
+          if (callerSpawn === undefined) {
+            callerSpawn = await readSpawnMeta($, callerId).catch(() => undefined)
+            if (callerSpawn !== undefined) spawnSeen.set(callerId, callerSpawn)
+          }
+          const callerProvenance = mergeProvenance(provenanceOf(callerRecord), callerSpawn)
+          if (callerProvenance?.predecessorAgentId === target) isSuccessor = true
+        } catch {
+          isSuccessor = false
+        }
+      }
+      if (wantFull || isSuccessor) {
+        const accessNote = isSuccessor && !wantFull
+          ? `Full-access: caller ${callerId} is the recorded successor via leading [auto-context-handover:continue child:${target}] marker/stored predecessor link; full texts included.`
+          : `Full-access: explicit full:true request; full texts included.`
+        return {
+          result: buildReferenceReadback({
+            header,
+            diagLine,
+            baselineLine,
+            provenanceLine,
+            generationLine,
+            seedSizeLine,
+            accessNote,
+            originalPrompt,
+            originalNote,
+            handover: stored.handover,
+            successorMarker: successorPointer,
+          }),
+        }
+      }
+      // Compact parent view (open-reader, no auth): headers plus pending
+      // decisions, Prioritized next steps excerpt, and pointer. Full texts
+      // only with full:true or recorded-successor auto-full above.
+      const pendingLine = buildPendingLine(stored.summary)
+      const nextStepsExcerpt = extractNextStepsSection(stored.handover)
       return {
-        result: buildReferenceReadback({
+        result: buildCompactReadback({
           header,
           diagLine,
+          baselineLine,
           provenanceLine,
           generationLine,
           seedSizeLine,
-          originalPrompt,
-          originalNote,
-          handover: stored.handover,
+          pendingLine,
+          nextStepsExcerpt,
           successorMarker: successorPointer,
+          targetId: stored.agentId,
         }),
       }
     }
@@ -750,9 +871,11 @@ export const register = (on: On, options?: RegisterOptions): void => {
     if ((agentId !== undefined && agentId !== "") || event.tool === HANDOVER_FULL || event.tool === READ_FULL) {
       // No host calls in the one-second catch budget. Uncertain child closure
       // stays protected; adapter tools must not fall through or claim success.
+      // next.error is host-set; guard for test harnesses or future shapes.
+      const kind = (next as { error?: { kind?: unknown } })?.error?.kind ?? "unknown"
       return {
         deny:
-          `auto-context-handover: tool hook failed before dispatch (${next.error.kind}); this call was not run. ` +
+          `auto-context-handover: tool hook failed before dispatch (${String(kind)}); this call was not run. ` +
           "Retry after recovery; handed-over children must stop and return control to their parent.",
       }
     }

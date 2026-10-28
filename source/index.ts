@@ -438,7 +438,7 @@ export default Plugin.define({
         name: READ_TOOL,
         options: { codemode: false },
         description:
-          "Read the full stored handover text for a session (a parent agent can read a child's handover, and any live session can read a locked one's). " +
+          "Read the full stored handover text for a session (any live caller can read any stored handover; no caller authorization, open policy). " +
           "Takes sessionID. Returns the verbatim handover plus header lines with agent and forward/back links. Fails when the session does not exist or no handover was stored.",
         input: ReadInput,
         execute: async (input) => {
