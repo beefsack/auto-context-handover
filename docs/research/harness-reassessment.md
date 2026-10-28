@@ -13,7 +13,8 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 | Roo Code | Dead harness, not worth building | - | - |
 | Aider CLI | Blocked, no installed surface | - | - |
 
-Next assessment order (not implementation rank): Kilo first (fast-track source-backed candidate), then Qwen / OpenHands / Kiro CLI follow-ups.
+Kilo's fast-track assessment is complete: [root advisory/manual MVP](kilo.md).
+Next assessments (not implementation rank): Qwen / OpenHands / Kiro CLI follow-ups.
 
 ## Cline: feasible via hook-bearing AgentExtension
 
@@ -78,7 +79,7 @@ loading, and documents explicit Stop-denial opt-in. Manual continuation remains.
 
 ## Quick screen: Kilo, Qwen, OpenHands, Zed, Warp, Kiro
 
-- Kilo Code: highest fast-track assessment candidate. Source-backed on measurement: per-message `AssistantMessage.tokens` (`input`/`output`/`reasoning`/`cache`) and `Session.tokens` fields exist in the pinned SDK types - but aggregation semantics are unverified from the declarations, so neither is claimed as a cumulative anchor. Injection (`experimental.chat.messages.transform`, `experimental.chat.system.transform`, `experimental.session.compacting`) and custom-tool handover surface stand from the docs read ([plugins](https://kilo.ai/docs/automate/extending/plugins)). Caveat: the upstream plugin contract is a legacy lineage match, not a verified V2 direct port; payload schemas, exact subagent event names, and programmatic new-session + seed + UI-switch rotation remain unverified. Do not claim the cheapest full adapter or exact subagent events before that read.
+- Kilo Code: subsequent [pinned 7.8.23 assessment and root advisory/manual MVP](kilo.md) supersede this quick screen. Current CLI-backed VS Code extension shares the documented server plugin surface. Real CLI registration observed; root OpenCode V2 entry rejected. Five-field ordinary-assistant normalization is source-established; summary-worker/pre-summary anchors excluded. No shim, child automation or verified model continuation.
 - Qwen Code: follow-up only. Richest screened hook lifecycle (`PreToolUse` deny, `Stop` block, `SessionStart`/`UserPromptSubmit` inject, prompt hooks, `PreCompact`/`PostCompact` with manual/auto matchers, subagent hooks) ([hooks](https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/)). No hook-readable current-window usage or complete-request estimator verified; cumulative usage would not suffice. Quick screen only, not proven feasible and not ranked above the assessed candidates.
 - OpenHands: follow-up only. `PreToolUse` deny, `Stop` block (lint/test gate), `UserPromptSubmit` `additionalContext`, plus SDK plugin packaging ([hooks](https://docs.openhands.dev/openhands/usage/customization/hooks), [SDK plugins](https://docs.openhands.dev/sdk/guides/plugins)). Trigger source (no usage in hook payload found) and hook-initiated rotation are unverified; quick screen only.
 - Kiro CLI: follow-up (promising, payload-schema read required). The prior IDE-only "no hooks" reading is invalid for the CLI: primary docs list CLI lifecycle triggers (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, plus `agentSpawn` as a 2.x/V3 alias) with a per-trigger block table (`PreToolUse` can block; `Stop` can request another turn; `UserPromptSubmit` cannot block in CLI V3) ([trigger types](https://kiro.dev/docs/hooks/types/), [CLI hooks migration](https://kiro.dev/docs/cli/v3/hooks-migration/)). Page bodies are thin/secondary-corroborated, so hook payload schema (usage? caller identity?) and programmatic continuation stay UNVERIFIED: promising, not blocked-due-to-no-model-gate, and not proven feasible.

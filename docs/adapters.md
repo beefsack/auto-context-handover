@@ -210,6 +210,28 @@ compliance. Real host MCP probing/hook parsing was non-model only.
 | 11 | XDG-data/HOME private hashed-id files, immutable first-writer atomic link publication, new dirs/files0700/0600. No quota/TTL/eviction/deletion cleanup/fsync guarantee; temps may remain. Latest persisted estimate/stage/soft, reason always unknown. |
 | 12 | Full readback only, any host-bound caller (including children) may read any retained id. Writer pins AGENT_SESSION_ID, matches call metadata and exported root id/type/parent; no authored caller. Real Hidden probe passed binding then refused writer. Not a same-user sandbox. |
 
+## Kilo root-session MVP
+
+CLI/plugin/SDK and CLI-backed VS Code extension source **7.8.23**:
+[Kilo assessment](research/kilo.md). Real CLI loading and tool registration
+observed without a model; extension dispatch is source-established only.
+**Fixture-covered** never means model compliance or continuation.
+
+| # | Kilo status against the requirement above |
+| --- | --- |
+| 1 | `chat.message` appends a synthetic introduction to the first root user message per registration, persisted by host; reload can repeat it. Later transient tail notices reference it. No system-prefix rewrite/priority claim; compliance unverified. |
+| 2 | Direct `context_handover`/`read_handover`, each observed once in the real CLI registry. No deferred loader. Host Zod preserves required string args but drops per-arg descriptions; tool-level guidance remains. Policies may hide tools. |
+| 3 | Intro defines current-step boundary, final-report replacement and plugin-storage permission under read-only tasks. Advisory guidance only; fixture-covered. |
+| 4 | Latest ordinary normalized five-field usage + trailing text/settled tool outputs at chars/4 over active filtered history. Summary workers and pre-summary retained-tail anchors excluded; fresh usage required after compaction. Fixed shared stages; catalog context window, capped integers/explicit percentages. Unknowns silent, no hard gate. |
+| 5 | Absent automatic continuation: user opens fresh equipped root and submits reader reference. No parent preauthorization or automatic create/prompt. |
+| 6 | n/a child replacement. No model selection, settings or override-preservation promise. |
+| 7 | n/a child handback. Writer stores model strings and advises ending turn; stop/final delivery compliance unverified. |
+| 8 | No source lock or stop correction; source remains usable, immutable handover cannot be overwritten. Corrupt storage needs manual recovery. |
+| 9 | Manual reader reference, full text once/shared no-repeat/predecessor-evidence/title framing. Host source session/agent recorded; no original task capture, automatic seed, child lineage or successor classification. |
+| 10 | Handover-only chars/4 >50% of recorded soft warns/advises compression only. Model text stays verbatim; no fixed cap, productivity classification or loop guard. |
+| 11 | HOME private hashed-id files, immutable atomic first-writer publication, new dirs/files 0700/0600. No quota/TTL/eviction/deletion cleanup/fsync promise; temps may remain. Latest estimate/stage/soft/notice-append reason; lost diagnostics unknown. |
+| 12 | Full readback only; any equipped caller (including children) may read any retained id. Writer uses host context plus fresh matching parentless session lookup, not authored identity. Model/override/chain unknown; no arbitrary-path or parent-only reader policy, not a same-user sandbox. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -237,6 +259,9 @@ compliance. Real host MCP probing/hook parsing was non-model only.
 - Goose intentionally differs: explicit Stop-denial opt-in, lagged native JSON
   export and per-session stdio process binding; no model-visible start intro,
   ordinary tool gate, automatic continuation or source lock.
+- Kilo intentionally differs: legacy hook/SDK API, shared pure logic rather
+  than an OpenCode V2 shim; root-only anchored advisories and manual reader
+  continuation, no KV/source lock/UI following or native child workflow.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

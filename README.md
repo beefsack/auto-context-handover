@@ -8,8 +8,9 @@ and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
 [Cline CLI/SDK root adapter](#cline-clisdk-root-adapter), plus an
-[Amp focused-root adapter](#amp-focused-root-adapter) and a
-[Goose root adapter](#goose-root-session-adapter).
+[Amp focused-root adapter](#amp-focused-root-adapter), a
+[Goose root adapter](#goose-root-session-adapter) and a
+[Kilo root adapter](#kilo-root-session-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -157,6 +158,69 @@ calls before completion.
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
   only warns.
+
+## Kilo (root-session adapter)
+
+Targets **Kilo CLI 7.8.23** (`@kilocode/cli`) and the current CLI-backed
+**Kilo Code VS Code extension 7.8.23** plugin contract. CLI loading/registration
+is observed; extension loading and model compliance are unverified. Legacy
+Roo-derived Kilo extension releases are not supported. The OpenCode V2 root
+entry does not load on Kilo's different API; use `kilo/index.ts` instead.
+
+Run `npm install` in this intact checkout, then merge into project `kilo.json`
+(or the Kilo user config). No build, separate MCP server or marketplace install:
+
+```jsonc
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "plugin": [
+    ["file:///absolute/path/to/auto-context-handover/kilo/index.ts", { "soft": 150000 }]
+  ]
+}
+```
+
+- Keep the checkout and dependencies together; do not copy `kilo/` alone or
+  install the repository root as a Kilo plugin. `KILO_PURE=1` disables external
+  plugins. Kilo's key is singular `plugin`, unlike OpenCode V2 `plugins`.
+- Root sessions only: host tool context supplies session/agent identity;
+  `session.get` must confirm a matching parentless session before writing.
+  Children cannot write; any equipped caller may read any retained id.
+- Latest ordinary assistant's normalized input/cache/output/reasoning plus
+  trailing text and settled tool outputs at chars/4 estimates the active
+  compaction-filtered history. This is not cumulative billing or exact tokens;
+  later host overhead/media/pruning changes are not modeled. Summary-worker
+  usage and pre-summary retained-tail anchors are excluded; after compaction
+  measurement waits for fresh ordinary usage. Unknowns produce no notice.
+- `soft` defaults to 150000; integers cap at 70% of the request model's catalog
+  context window. Percentage strings use their explicit percentage. Unknown
+  window: integers uncapped, percentages silent. The tuple option overrides
+  `AUTO_CONTEXT_HANDOVER_SOFT`; invalid values disable notices, not tools.
+- Intro text is added to the first root user message per plugin registration;
+  a reload can introduce it again. Stable transient tail notices escalate at
+  soft, soft x 1.1 and soft x 1.2. Native compaction is unchanged and may happen
+  first; an observation-only hook skips its separate summarizer transform.
+- The model calls `context_handover({handover, summary})` and ends its turn.
+  No automatic rollover, source lock, hard gate or UI following. Open a
+  **fresh equipped root**, not a resumed history, and submit:
+
+  ```text
+  Call read_handover({"sessionID":"SOURCE_ID"}) and continue from "Prioritized next steps".
+  ```
+
+- Full verbatim text returns once with shared no-repeat/evidence framing.
+  Handover-only chars/4 above 50% of recorded soft warns/advises compression,
+  never rewrites or gates. No original-task capture, child lineage or
+  model-override preservation promise. Diagnostics record notice append, not
+  model receipt; transient loss after reload stays unknown.
+- Immutable hashed-id records live under `~/.kilo/auto-context-handover/`.
+  New directories/files use 0700/0600; first-writer atomic publication is not
+  fsync durability or a same-user sandbox. No quota/TTL/eviction/deletion
+  cleanup; retention is manual and interrupted writes can leave temporary files.
+
+[Capabilities, pinned citations and non-model checks](docs/research/kilo.md).
+Actual hook dispatch, model compliance and manual fresh-root continuation
+remain unverified. The host's older Zod preserves required string schemas but
+drops per-argument descriptions; the complete tool descriptions remain intact.
 
 ## Goose (root-session adapter)
 
