@@ -1,5 +1,10 @@
 # Decisions
 
+## Deferred harness reassessment (2026-10-29)
+
+- (tentative, pending user review) Evaluate advisory adapters against measurement (including honest estimators/lagged observations), attributed injection, model-authored storage/readback and manual or automatic fresh-context continuation. A per-model gate or automatic UI switch is not an MVP prerequisite; automatic continuation remains the preferred direction, not a claim about these candidates.
+- (tentative, pending user review) Recommend Cline's hook-bearing extension surface first (CLI installation documented, CLI package verification still needed), then Amp, then a conditional root-only Goose assessment/implementation. Goose denial-framed notices require explicit opt-in and proven writer identity. Keep Cursor deferred for measured pre-compaction handover until a pre-compaction estimator or deferrable measurement boundary is established; Roo is discontinued and Aider lacks a supported installed surface. Fast-track Kilo assessment separately, followed by Qwen/OpenHands/Kiro CLI. No adapter is implemented by this assessment. [Evidence and exact conditions](research/harness-reassessment.md).
+
 ## AiderDesk root Agent-task MVP (2026-10-29)
 
 - (tentative, pending user review) Target AiderDesk `0.90.0-dev` source `831d10d65438a7373920b6927231e3ed09445b68` and shipped `@aiderdesk/extensions@0.39.0` types. Root Agent mode only, not native subagents or compaction/Aider modes. Direct TypeScript entry with shared guidance/thresholds and no build; install a real `aiderdesk/index.ts` forwarding entry to the repository, not a symlink or isolated folder copy. Host provides Zod; real shipped types are development dependencies. [Assessment](research/aiderdesk.md).
