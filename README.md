@@ -11,7 +11,8 @@ and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Amp focused-root adapter](#amp-focused-root-adapter), a
 [Goose root adapter](#goose-root-session-adapter), a
 [Kilo root adapter](#kilo-root-session-adapter) and a
-[Qwen child adapter](#qwen-code-subagent-first-adapter).
+[Qwen child adapter](#qwen-code-subagent-first-adapter), plus an
+[OpenHands SDK adapter](#openhands-sdk-adapter) (not a CLI plugin).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -757,6 +758,68 @@ feasibility is assessed docs-only (blocked, no implementation) in
 AWS Kiro CLI **2.35.1** is also [assessed, not shipped](docs/research/kiro-cli.md):
 hook-readable active-context measurement and MCP caller binding remain
 unestablished. No Kiro adapter installation is available.
+
+## OpenHands SDK adapter
+
+Targets **`openhands-sdk==1.21.0`**, tested with Python3.12. This is a small
+Python composition helper for a local SDK application, **not** a drop-in plugin
+for `openhands` CLI1.16.0, its TUI/ACP or a remote agent server. No build or
+replacement driver loop. [Capabilities and CLI blockers](docs/research/openhands.md).
+
+```sh
+python -m pip install -r openhands/requirements.txt
+export PYTHONPATH="$PWD/openhands${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+In your SDK application, equip a fresh uninitialized `agent` configured normally
+with its own LLM/metrics object; keep the adapter object alive for that conversation:
+
+```python
+from openhands.sdk import Conversation
+from openhands.sdk.hooks import HookConfig
+from handover_adapter import HandoverAdapter
+
+adapter = HandoverAdapter()
+conversation = Conversation(
+    agent=adapter.equip(agent),
+    workspace=workspace,
+    callbacks=[*existing_callbacks, adapter.on_event],
+    hook_config=HookConfig.merge([existing_hooks, adapter.hook_config]),
+)
+adapter.bind(conversation)
+```
+
+`existing_callbacks` and `existing_hooks` are your application's existing list
+and HookConfig (use `[]` and `HookConfig()` if absent). Bind once before any
+send/run; use normal SDK send/run calls afterwards. Keep `handover_adapter.py`
+at its import location: the hook invokes that file with the current interpreter.
+
+- Latest main-agent response prompt + completion drives shared stages, **only on
+  the next submitted user prompt**. New prompt/tool-result growth is omitted;
+  no notice inside autonomous runs. Condensation invalidates old usage until a
+  new ordinary response; native condenser stays enabled/unchanged and can run first.
+- `AUTO_CONTEXT_HANDOVER_SOFT` or `HandoverAdapter(soft=...)`: default150000,
+  positive integer tokens capped at70% of a known response context_window;
+  explicit percentages uncapped. Unknown window disables percentages; unknown
+  usage is silent. Invalid/empty explicit values log and disable notices, not tools.
+- Direct `context_handover({handover,summary})` stores model-authored strings
+  verbatim; `read_handover({sessionID})` returns full text once and continuation
+  framing. Both require their exact SDK-bound caller; any equipped caller may
+  read any retained source id. No automatic root/child classification or delegation.
+- Manual continuation: create a **fresh**, independently equipped local
+  Agent/Conversation (new id, not resume/fork) and submit the source reader
+  reference. No automatic rollover/UI following, source lock, Stop interception,
+  token gate or model/settings-preservation promise.
+- HOME-based `~/.openhands/auto-context-handover/<sha256(session-id)>/` uses
+  private new directories/files and immutable first-writer handover publication.
+  No quota/TTL/eviction/deletion cleanup/fsync guarantee; snapshot/temp files may
+  remain. Same-user filesystem access is not a sandbox. Reloaded diagnostics
+  begin unknown; emitted-nudge provenance survives later measurements/condensation,
+  but does not prove model receipt. Failed snapshot writes log, keep fresh memory
+  diagnostics and attempt stale-file removal; failed removal can leave stale notices.
+- `PYTHONPATH=openhands python openhands/test_handover_adapter.py` checks the
+  pinned SDK without model execution. Node tests guard shared Python text drift.
+  Real model compliance and continuation remain unverified.
 
 ### GitHub Copilot CLI (subagent-first adapter)
 

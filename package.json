@@ -18,6 +18,8 @@
     "crush",
     "goose",
     "kilo",
+    "openhands",
+    "!openhands/__pycache__",
     "pi",
     "plugin.json",
     "mcp.json",

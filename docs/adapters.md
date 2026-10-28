@@ -253,6 +253,28 @@ Extension linking and real host MCP connection were observed without a model.
 | 11 | HOME private immutable hashed-id handover+closure, unchanged Codex store; no quota/TTL/eviction/deletion cleanup/fsync guarantee. Pending/temp files may remain. Compaction byte floors, corrupt/torn reads unknown; failed floor writes log but can leave stale floors. Diagnostics reflect notice append, not receipt; invalid soft reads unknown. |
 | 12 | Compact default, full:true verbatim read; unavailable pending decisions/provenance unknown. Any live host-bound caller may read any composite session:agent id, closed callers denied. Single-use original-args capability, not authored caller identity or same-user sandbox. |
 
+## OpenHands SDK advisory MVP
+
+SDK `1.21.0`, assessed CLI `1.16.0`: [capabilities and citations](research/openhands.md).
+SDK-only local composition, not a CLI plugin or replacement application.
+Real package load/hooks are non-model observations; **fixture-covered** never
+means model compliance or successful continuation.
+
+| # | OpenHands status against the requirement above |
+| --- | --- |
+| 1 | AgentContext system suffix introduction preserves existing context; UserPromptSubmit notices reference it. Source-established placement, fixture-covered, trust/compliance unverified. |
+| 2 | Direct context_handover/read_handover ToolDefinitions, real SDK resolution observed; no deferred loader. Host tool policy can filter them. CLI MCP support does not install these Python tools. |
+| 3 | Intro defines current step, final-report replacement and plugin-storage writes in read-only work. Advisory guidance, not priority enforcement. |
+| 4 | Latest main-agent per-response prompt+completion, never combined/accumulated/condenser metrics; fixed shared stages only on next user submission. Integer default150000 capped70% known context_window, explicit percentages; unknowns silent. No tool-boundary/Stop notice or hard gate. |
+| 5 | Absent automatic continuation; application creates a fresh equipped local Conversation and submits source reader reference. No parent preauthorization or implicit driver loop. |
+| 6 | n/a child replacement/count rules. Explicit application binding, no automatic root classifier; inherited tools refuse a different conversation. No settings/override-preservation promise. |
+| 7 | n/a native child handback. Writer stores strings and advises ending turn/manual continuation; stop/final receipt compliance unverified. |
+| 8 | No source lock, Stop correction or never-resume enforcement. Immutable first write retained; corrupted storage requires manual recovery. |
+| 9 | Manual fresh-conversation reader reference, full text once/shared no-repeat/predecessor-evidence/title framing. Host source id recorded; no captured original, lineage or automatic successor classification. |
+| 10 | Handover-only chars/4 >50% recorded soft warns/advises next-handover compression only; no rewriting/fixed cap/growth classification. |
+| 11 | HOME private hashed-id files, atomic immutable first-writer link publication, new dirs/files0700/0600. No quota/TTL/eviction/deletion cleanup/fsync guarantee; snapshots/temps may remain. Latest memory diagnostics plus independently latched emission, not receipt; reload unknown. Failed writes log/retry and attempt stale-file removal; failed removal can leave stale notices. Native condensation clears usage, not nudge provenance, without modifying condenser. |
+| 12 | Full reader only; own exact host object/id required, any equipped caller reads any retained target. No arbitrary-path or parent-only authorization/same-user sandbox. Effective model/override/original task/chain unknown, not authored provenance. |
+
 ## Kiro CLI assessment (not shipped)
 
 AWS Kiro CLI stable `2.35.1`, artifact/hash and primary-source capability table:
@@ -304,6 +326,9 @@ targeting. [Unblock conditions](research/kiro-cli.md#blockers-and-unblock-path).
 - Qwen intentionally differs: native classic command hooks, child transcript
   response records and Codex capability/store reuse; no Gemini BeforeModel,
   child window discovery, Stop telemetry, lineage or automatic parent spawn.
+- OpenHands intentionally differs: Python local-SDK composition only; lagged
+  previous-response notices on the next user prompt, not inside autonomous runs.
+  Manual fresh-context continuation; no CLI injection, Stop gate or child workflow.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
