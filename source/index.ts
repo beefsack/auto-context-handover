@@ -26,13 +26,16 @@ import {
 } from "./measure.ts"
 import { allKeys, keys, HANDOVER_TOOL, READ_TOOL, isRecord } from "./store.ts"
 import { ROLLOVER_METADATA_KEY } from "./tui-follow.ts"
-import type { StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
+import type { StoredDiag, StoredHandover, StoredLink, StoredLock, StoredSoftOverride, StoredState } from "./store.ts"
+import { formatDiagLine } from "./shared/handover-text.ts"
 import { matchSoftMarker, resolveSoftMarker } from "./soft-marker.ts"
 import {
+  buildChildHardDirective,
+  buildChildNudge,
   buildForwardNotice,
   buildHardDirective,
+  buildLockedChildDirective,
   buildLockedDirective,
-  buildLockedFinalReply,
   buildLockModeNotice,
   buildNudge,
   buildSubagentReturn,
@@ -62,9 +65,21 @@ const readStrict = async (ctx: Context, key: string, what: string): Promise<Reco
   return isRecord(value) ? (value as Record<string, unknown>) : undefined
 }
 
+const asStoredDiag = (value: unknown): StoredDiag | undefined => {
+  if (!isRecord(value)) return undefined
+  const reason = typeof value.reason === "string" && value.reason.length > 0 ? value.reason : "unknown"
+  const stage = typeof value.stage === "string" && value.stage.length > 0 ? value.stage : "unknown"
+  const num = (field: string): number | "unknown" =>
+    typeof value[field] === "number" && Number.isFinite(value[field]) && (value[field] as number) >= 0
+      ? Math.floor(value[field] as number)
+      : "unknown"
+  return { reason, stage, estimate: num("estimate"), soft: num("soft") }
+}
+
 const asStoredHandover = (value: Record<string, unknown> | undefined): StoredHandover | undefined => {
   if (!value || typeof value.text !== "string" || typeof value.summary !== "string") return undefined
   const model = isRecord(value.model) ? value.model : {}
+  const diag = asStoredDiag(value.diag)
   return {
     text: value.text,
     summary: value.summary,
@@ -74,6 +89,7 @@ const asStoredHandover = (value: Record<string, unknown> | undefined): StoredHan
       id: typeof model.id === "string" ? model.id : "unknown",
     },
     storedAt: typeof value.storedAt === "number" ? value.storedAt : 0,
+    ...(diag === undefined ? {} : { diag }),
   }
 }
 
@@ -118,7 +134,11 @@ export default Plugin.define({
     // always follows a context hook, and progress must use the pre-call
     // snapshot (the current turn's own handover output must not count).
     const lastRequest = new Map<string, { agent: string; providerID: string; id: string; variant?: string }>()
-    const lastUsage = new Map<string, { estimate: number; softTokens: number }>()
+    const lastUsage = new Map<string, { estimate: number; softTokens: number; stage: string }>()
+    // Independent call-time diagnostics snapshot: preserves partially
+    // available values (soft known without measurement, estimate known
+    // without a resolvable soft) and never drives nudge/gate/loop text.
+    const lastDiag = new Map<string, { estimate: number | "unknown"; soft: number | "unknown"; stage: string }>()
     // Duplicate-call guard and same-process pending-successor map.
     // In-memory only: KV has no CAS, and a stale gate must not survive a
     // restart. Keys are always the raw session IDs, unmodified.
@@ -148,6 +168,9 @@ export default Plugin.define({
           try {
             const existingLock = asStoredLock(await readStrict(ctx, keys.lock(sessionID), "source lock"))
             if (existingLock) {
+              if (existingLock.finalReply) {
+                return { content: `${buildLockedChildDirective(existingLock.reason, sessionID)} Handover not recorded; this session is already locked.` }
+              }
               return { content: `${buildLockedDirective(existingLock.reason, sessionID)} Handover not recorded; this session is already locked.` }
             }
             const info = await ctx.session.get({ sessionID }).catch((error: unknown) => {
@@ -169,12 +192,23 @@ export default Plugin.define({
             if (handover.trim().length === 0) {
               throw new Tool.Error({ message: "auto-context-handover: \"handover\" must be the full handover text, verbatim and non-empty" })
             }
+            // Call-time diagnostics from the pre-call hook snapshot, never by
+            // measuring the handover payload itself. Missing snapshots stay
+            // unknown; the reason never infers a user request.
+            const diagSnap = lastDiag.get(sessionID)
+            const diag: StoredDiag = {
+              reason: !diagSnap || diagSnap.stage === "unknown" ? "unknown" : diagSnap.stage !== "ok" ? "nudged" : "not-nudged",
+              stage: diagSnap ? diagSnap.stage : "unknown",
+              estimate: diagSnap ? diagSnap.estimate : "unknown",
+              soft: diagSnap ? diagSnap.soft : "unknown",
+            }
             const stored: StoredHandover = {
               text: handover,
               summary,
               agent: toolCtx.agent,
               model: { providerID: identity.providerID, id: identity.id },
               storedAt: Date.now(),
+              diag,
             }
             try {
               await ctx.storage.set(keys.handover(sessionID), stored as unknown as Parameters<typeof ctx.storage.set>[1])
@@ -186,8 +220,8 @@ export default Plugin.define({
 
             if (info.parentID) {
               // Subagents never open root sessions. Persistent stop lock; the
-              // next hook strips all tools and replays only the short final
-              // reply below. No loop accounting for children, and the full
+              // next hook strips all tools and prescribes a locked refusal.
+              // No loop accounting for children, and the full
               // handover text is never included in the return.
               const finalReply = buildSubagentReturn(summary || "Handover stored.", sessionID)
               try {
@@ -428,11 +462,12 @@ export default Plugin.define({
             `Handover from session ${target} (agent ${stored.agent})` +
             (links.length > 0 ? ` [${links.join("; ")}]` : "") +
             ":"
+          const diagLine = formatDiagLine(stored.diag)
           // Direct route plus pre-set bypass: the host otherwise truncates
           // long tool output and spills it to a file (core/tool-output.ts).
           // A full read can consume large context; the soft-limit estimator
           // sees the result after its anchor, so this is expected behavior.
-          return { content: `${header}\n\n${stored.text}`, metadata: { truncated: false } }
+          return { content: `${header}\n${diagLine}\n\n${stored.text}`, metadata: { truncated: false } }
         },
       })
     })
@@ -441,6 +476,7 @@ export default Plugin.define({
       // Clear first: an unmeasurable new request must not reuse the previous
       // request's snapshot as its progress baseline.
       lastUsage.delete(event.sessionID)
+      lastDiag.delete(event.sessionID)
       lastRequest.set(event.sessionID, {
         agent: event.agent,
         providerID: event.model.providerID,
@@ -452,7 +488,7 @@ export default Plugin.define({
         if (locked) {
           for (const name of Object.keys(event.tools)) delete event.tools[name]
           event.messages.push(
-            Message.system(locked.finalReply ? buildLockedFinalReply(locked.reason, locked.finalReply) : buildLockedDirective(locked.reason, event.sessionID)),
+            Message.system(locked.finalReply ? buildLockedChildDirective(locked.reason, event.sessionID) : buildLockedDirective(locked.reason, event.sessionID)),
           )
           return
         }
@@ -477,15 +513,30 @@ export default Plugin.define({
           scope.modelID,
         )
         const softTokens = resolveSoftTokens(parseThreshold(spec), window)
-        if (softTokens === undefined) return
         // Hard limits keep the existing resolution: no 70% cap, and an
         // unknown window fails open (no gate).
         const hardTokens = config.hard === undefined || window === undefined ? undefined : resolveThresholdTokens(parseThreshold(config.hard), window)
         const history = await ctx.session.context({ sessionID: event.sessionID }).catch(() => undefined)
+        const measured = history ? measureSession(history.map(narrow)) : undefined
+        // Independent diagnostics snapshot: preserves partially available
+        // values without driving nudge/gate/loop. Soft known without
+        // measurement, or estimate known without a resolvable soft, are
+        // both kept; stage is unknown unless both are known.
+        try {
+          const diagSoft: number | "unknown" = softTokens ?? "unknown"
+          const diagEstimate: number | "unknown" = measured ? measured.estimate : "unknown"
+          const diagStage = measured !== undefined && softTokens !== undefined
+            ? stageOf(measured.estimate, softTokens, hardTokens, config.stages)
+            : "unknown"
+          if (diagSoft !== "unknown" || diagEstimate !== "unknown") {
+            lastDiag.set(event.sessionID, { estimate: diagEstimate, soft: diagSoft, stage: diagStage })
+          }
+        } catch {
+          // Diagnostic-only; never affects the request.
+        }
+        if (softTokens === undefined) return
         if (!history) return
-        const measured = measureSession(history.map(narrow))
         if (!measured) return
-        lastUsage.set(event.sessionID, { estimate: measured.estimate, softTokens })
         const state = asStoredState(await readJson(ctx, keys.state(event.sessionID)).catch(() => undefined))
         if (state && measured.estimate > state.highWater) {
           await ctx.storage
@@ -493,13 +544,19 @@ export default Plugin.define({
             .catch(() => undefined)
         }
         const stage = stageOf(measured.estimate, softTokens, hardTokens, config.stages)
+        lastUsage.set(event.sessionID, { estimate: measured.estimate, softTokens, stage })
         if (stage === "ok") return
+        // Child framing is conditional on the established real-child
+        // classification (session parentID, as in the handover tool path).
+        // Unknown or unreadable sessions fail open to the root texts.
+        const hookInfo = await ctx.session.get({ sessionID: event.sessionID }).catch(() => undefined)
+        const isChild = !!hookInfo?.parentID
         if (stage === "hard") {
           applyToolGate(event.tools as Record<string, unknown>, [HANDOVER_TOOL])
-          event.messages.push(Message.system(buildHardDirective(hardTokens)))
+          event.messages.push(Message.system(isChild ? buildChildHardDirective(hardTokens) : buildHardDirective(hardTokens)))
           return
         }
-        event.messages.push(Message.system(buildNudge(stage)))
+        event.messages.push(Message.system(isChild ? buildChildNudge(stage) : buildNudge(stage)))
       } catch {
         // Fail open: any measurement or host failure leaves the request untouched.
       }
@@ -558,6 +615,7 @@ export default Plugin.define({
               }
               lastRequest.delete(sessionID)
               lastUsage.delete(sessionID)
+              lastDiag.delete(sessionID)
               inflight.delete(sessionID)
               pendingSuccessor.delete(sessionID)
             }

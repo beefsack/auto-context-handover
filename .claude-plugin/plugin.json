@@ -1,0 +1,15 @@
+{
+  "name": "auto-context-handover",
+  "description": "Subagent-only context handover for Claude Code: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children. Root sessions are untouched.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "userConfig": {
+    "soft": {
+      "type": "number",
+      "title": "Soft threshold",
+      "description": "Child context threshold in tokens that triggers staged nudges. Positive integer only, uncapped (the child window is unknown). Default 150000.",
+      "default": 150000,
+      "min": 1
+    }
+  }
+}

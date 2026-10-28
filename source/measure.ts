@@ -5,36 +5,12 @@
 // (reasoning excluded), reasoning, cache.read, cache.write. Always sum the
 // five normalized fields once; native metadata is never a usage source.
 
-export type ThresholdSpec = { readonly kind: "percent"; readonly ratio: number } | { readonly kind: "tokens"; readonly tokens: number }
-
-export class ThresholdError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "ThresholdError"
-  }
-}
-
-/** A "70%" string or a positive absolute integer. Ratios are rejected. */
-export function parseThreshold(value: unknown): ThresholdSpec {
-  if (typeof value === "number") {
-    if (!Number.isInteger(value) || value <= 0) {
-      throw new ThresholdError(`threshold must be a "70%" string or a positive absolute integer of tokens, got ${String(value)}`)
-    }
-    return { kind: "tokens", tokens: value }
-  }
-  if (typeof value === "string") {
-    const match = value.trim().match(/^(\d+(?:\.\d+)?)%$/)
-    if (!match) {
-      throw new ThresholdError(`threshold must be a "70%" string or a positive absolute integer of tokens, got ${JSON.stringify(value)}`)
-    }
-    const ratio = Number(match[1]) / 100
-    if (!(ratio > 0) || ratio > 1) {
-      throw new ThresholdError(`threshold percent must be within (0%, 100%], got ${JSON.stringify(value)}`)
-    }
-    return { kind: "percent", ratio }
-  }
-  throw new ThresholdError(`threshold must be a "70%" string or a positive absolute integer of tokens, got ${String(value)}`)
-}
+// Threshold parsing lives in ./shared/threshold.ts so the Claude Code child
+// adapter can reuse it without importing OpenCode measurement logic.
+// Re-exported here so existing imports from "./measure.ts" are unchanged.
+export { parseThreshold, ThresholdError, type ThresholdSpec } from "./shared/threshold.ts"
+export { seedTooLarge } from "./shared/seed-size.ts"
+import type { ThresholdSpec } from "./shared/threshold.ts"
 
 export function resolveThresholdTokens(spec: ThresholdSpec, windowTokens: number): number {
   if (spec.kind === "tokens") return spec.tokens
@@ -270,9 +246,4 @@ export function inheritStreak(parent: LoopState, seedEstimate: number): LoopStat
 /** Lock the primary after 3 consecutive unproductive successions. */
 export function loopLockRequired(state: LoopState): boolean {
   return state.unproductive >= 3
-}
-
-/** Warn when the full seed alone exceeds 50% of soft; never blocks. */
-export function seedTooLarge(seedEstimate: number, softTokens: number): boolean {
-  return seedEstimate > softTokens * 0.5
 }

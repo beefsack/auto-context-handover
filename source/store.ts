@@ -31,12 +31,20 @@ export interface StoredHandover {
   readonly agent: string
   readonly model: { readonly providerID: string; readonly id: string }
   readonly storedAt: number
+  readonly diag?: StoredDiag
+}
+
+export interface StoredDiag {
+  readonly reason: string
+  readonly stage: string
+  readonly estimate: number | "unknown"
+  readonly soft: number | "unknown"
 }
 
 export interface StoredLock {
   readonly reason: string
   readonly at: number
-  /** Short parent-facing reply stored at lock time; replayed verbatim by the locked hook. Never the full handover. */
+  /** Initial parent-facing child reply; its presence selects child locked-follow-up guidance. Never the full handover. */
   readonly finalReply?: string
 }
 

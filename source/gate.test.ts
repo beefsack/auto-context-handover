@@ -5,7 +5,7 @@ import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import type { Plugin } from "@opencode/plugin"
 import plugin from "./index.ts"
-import { buildSuccessorSeed, HANDOVER_DESCRIPTION } from "./text.ts"
+import { buildChildHardDirective, buildChildNudge, buildHardDirective, buildLockedChildDirective, buildLockedChildReturn, buildNudge, buildSubagentReturn, buildSuccessorSeed, HANDOVER_DESCRIPTION } from "./text.ts"
 
 interface AddedTool {
   name: string
@@ -544,10 +544,19 @@ describe("auto-context-handover harness", () => {
     )
     assert.equal(fake.created.length, 0)
     assert.ok(fake.storage.get("auto-context-handover:lock:ses_child"))
-    assert.match(String(result.content), /child done/)
-    assert.match(String(result.content), /ses_child/)
-    assert.match(String(result.content), /read_handover/)
-    assert.match(String(result.content), /ends here/)
+    assert.match(String(result.content), /^Context handover \(incomplete\): child done/)
+    assert.match(String(result.content), /NOT complete/)
+    assert.match(String(result.content), /rollover/)
+    assert.match(String(result.content), /read_handover\(\{"sessionID":"ses_child"\}\)/)
+    assert.match(String(result.content), /same agent type/)
+    assert.match(String(result.content), /original task pointer/)
+    assert.match(String(result.content), /Prioritized next steps/)
+    assert.match(String(result.content), /completed steps are done/)
+    assert.match(String(result.content), /trusted unless marked unverified/)
+    assert.match(String(result.content), /do not recast predecessor direct evidence/)
+    assert.match(String(result.content), /may redirect/)
+    assert.match(String(result.content), /user-owned decisions unrelated to context size/)
+    assert.ok(!String(result.content).includes("(no model prescription)"))
     const later = contextEvent("ses_child", { bash: {}, context_handover: {} })
     await fake.hooks.get("context")?.(later as unknown as Record<string, unknown>)
     assert.deepEqual(Object.keys(later.tools), [])
@@ -959,10 +968,15 @@ describe("auto-context-handover harness", () => {
     assert.deepEqual(Object.keys(later.tools), [])
     const text = later.messages.map((message) => JSON.stringify(message)).join("\n")
     assert.match(text, /ONLY/)
-    assert.match(text, /child summary abc/)
+    assert.match(text, /locked after a context handover/)
+    assert.match(text, /cannot answer questions or do more work/)
+    assert.match(text, /Context handover \(incomplete\):/)
     assert.match(text, /ses_kid/)
     assert.match(text, /read_handover/)
+    assert.match(text, /same agent type/)
+    assert.match(text, /fresh subagent/)
     assert.ok(!text.includes(full))
+    assert.ok(!text.includes("child summary abc"))
   })
 
   it("lock mode stores the handover with a session read hint and no successor", async () => {
@@ -1342,6 +1356,372 @@ describe("auto-context-handover harness", () => {
       const quiet = await estimateEvent(percentFake, "ses_unk_pct", 155000, { providerID: "unknown", id: "nope" })
       assert.equal(quiet.messages.length, 0)
       assert.deepEqual(Object.keys(quiet.tools), ["bash"])
+    })
+  })
+
+  describe("child continuation default", () => {
+    it("keeps root rollover wording while adding the child continuation note", async () => {
+      const fake = makeFake({})
+      await setup(fake)
+      const tool = fake.tools.get("context_handover") as unknown as { description?: unknown }
+      const description = String(tool.description)
+      assert.match(description, /primary root session rotates/)
+      assert.match(description, /onHandover\.primary=lock/)
+      assert.match(description, /Child continuation default/)
+      assert.match(description, /rollover, not task completion/)
+      assert.match(description, /Context handover \(incomplete\):/)
+      assert.match(description, /same-agent-type successor/)
+      assert.match(description, /original task pointer/)
+      assert.match(description, /Prioritized next steps/)
+      assert.match(description, /completed steps are done/)
+      assert.match(description, /trusted unless marked unverified/)
+      assert.match(description, /do not recast predecessor direct evidence/)
+      assert.match(description, /user-owned decisions unrelated to context size/)
+    })
+
+    it("shares the executable next-steps rule", () => {
+      assert.match(HANDOVER_DESCRIPTION, /steps the successor can execute directly/)
+      assert.match(HANDOVER_DESCRIPTION, /not a roadblock/)
+      assert.match(HANDOVER_DESCRIPTION, /never a reason to ask the user/)
+      assert.match(HANDOVER_DESCRIPTION, /only a user-owned decision that is independent of the context limit/)
+    })
+
+    it("prefixes the child short reply once and keeps the reader call exact", async () => {
+      assert.equal(
+        buildSubagentReturn("Context handover (incomplete): almost done", "ses_prefix"),
+        buildSubagentReturn("almost done", "ses_prefix"),
+      )
+      const fake = makeFake({})
+      await setup(fake)
+      fake.sessions.set("ses_prefix", { id: "ses_prefix", parentID: "ses_parent", agent: "build", history: [] })
+      const event = contextEvent("ses_prefix", {})
+      await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      const plain = await handover.execute(
+        { handover: "work", summary: "almost done" },
+        { sessionID: "ses_prefix", agent: "build" },
+      )
+      assert.match(String(plain.content), /^Context handover \(incomplete\): almost done/)
+      assert.match(String(plain.content), /read_handover\(\{"sessionID":"ses_prefix"\}\)/)
+    })
+
+    it("pins byte-identical root nudge and hard-directive wording", () => {
+      assert.equal(
+        buildNudge("warn1"),
+        "Auto-context-handover notice. Context is filling. " +
+          "Finish the current unit of work, then call the context_handover tool with the full handover text. " +
+          "Do not start new work after this unit.",
+      )
+      assert.equal(
+        buildNudge("warn2"),
+        "Auto-context-handover warning. Wrap up now: complete only the step in progress, " +
+          "then call the context_handover tool with the full handover text. Starting new work risks losing state to compaction.",
+      )
+      assert.equal(
+        buildNudge("warn3"),
+        "Auto-context-handover final warning. Stop after this step and call the context_handover tool " +
+          "with the full handover text. Do not defer the handover past this response.",
+      )
+      assert.equal(
+        buildHardDirective(undefined),
+        "Context window hard limit reached. " +
+          "Only the context_handover tool remains available. " +
+          "Call it now with the full handover text, then stop. Do not attempt any other tool call; they are disabled.",
+      )
+    })
+
+    it("frames only real-child nudges, leaving root text byte-identical", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_root_nudge", {
+        id: "ses_root_nudge",
+        history: [assistantMessage({ input: 900, output: 100, reasoning: 50, cache: { read: 0, write: 0 } })],
+      })
+      const rootEvent = contextEvent("ses_root_nudge", { bash: {} })
+      await fake.hooks.get("context")?.(rootEvent as unknown as Record<string, unknown>)
+      assert.ok(messageText(rootEvent.messages).includes(JSON.stringify(buildNudge("warn1"))))
+      fake.sessions.set("ses_child_nudge", {
+        id: "ses_child_nudge",
+        parentID: "ses_parent",
+        agent: "build",
+        history: [assistantMessage({ input: 900, output: 100, reasoning: 50, cache: { read: 0, write: 0 } })],
+      })
+      const childEvent = contextEvent("ses_child_nudge", { bash: {} })
+      await fake.hooks.get("context")?.(childEvent as unknown as Record<string, unknown>)
+      const childText = messageText(childEvent.messages)
+      assert.ok(childText.includes(JSON.stringify(buildChildNudge("warn1"))))
+      assert.match(childText, /rollover, not completion/)
+      assert.match(childText, /normally continues in a successor/)
+      assert.match(childText, /not guaranteed/)
+      assert.match(childText, /Context handover \(incomplete\):/)
+      assert.match(childText, /prioritized executable next steps/)
+      assert.match(childText, /never turn context size/)
+      assert.ok(!/%/.test(childText))
+    })
+
+    it("frames the child hard gate while the root directive stays byte-identical", async () => {
+      const fake = makeFake({ soft: 1000, hard: 1500 })
+      await setup(fake)
+      fake.sessions.set("ses_child_hard", {
+        id: "ses_child_hard",
+        parentID: "ses_parent",
+        agent: "build",
+        history: [assistantMessage({ input: 1200, output: 300, reasoning: 100, cache: { read: 0, write: 0 } })],
+      })
+      const childEvent = contextEvent("ses_child_hard", { bash: {}, context_handover: {} })
+      await fake.hooks.get("context")?.(childEvent as unknown as Record<string, unknown>)
+      assert.deepEqual(Object.keys(childEvent.tools), ["context_handover"])
+      const childText = messageText(childEvent.messages)
+      assert.ok(childText.includes(JSON.stringify(buildChildHardDirective(1500))))
+      assert.match(childText, /Only the context_handover tool remains available/)
+      assert.match(childText, /normally continues in a successor/)
+    })
+  })
+
+  describe("locked child follow-up and honest status", () => {
+    it("keeps the initial child return as continuation while locked follow-ups are explicit", async () => {
+      const fake = makeFake({})
+      await setup(fake)
+      fake.sessions.set("ses_init", { id: "ses_init", parentID: "ses_parent", agent: "build", history: [] })
+      await fake.hooks.get("context")?.(contextEvent("ses_init", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      const first = await handover.execute({ handover: "body", summary: "work done" }, { sessionID: "ses_init", agent: "build" })
+      assert.match(String(first.content), /^Context handover \(incomplete\): work done/)
+      assert.match(String(first.content), /NOT complete/)
+      const retry = await handover.execute({ handover: "more", summary: "x" }, { sessionID: "ses_init", agent: "build" })
+      assert.match(String(retry.content), /locked after a context handover/)
+      assert.match(String(retry.content), /cannot answer questions or do more work/)
+      assert.match(String(retry.content), /read_handover/)
+      assert.match(String(retry.content), /ses_init/)
+      assert.match(String(retry.content), /Handover not recorded/)
+    })
+
+    it("replaces legacy stored replies with explicit locked text, never replaying summaries", async () => {
+      const fake = makeFake({})
+      await setup(fake)
+      fake.storage.set("auto-context-handover:handover:ses_legacy", { text: "legacy body", summary: "legacy summary", agent: "build", model: {}, storedAt: 1 })
+      fake.storage.set("auto-context-handover:lock:ses_legacy", { reason: "subagent handover returned to parent", at: 1, finalReply: "Context handover (incomplete): legacy summary legacy" })
+      fake.sessions.set("ses_legacy", { id: "ses_legacy", parentID: "ses_parent", agent: "build", history: [] })
+      const later = contextEvent("ses_legacy", { bash: {} })
+      await fake.hooks.get("context")?.(later as unknown as Record<string, unknown>)
+      const text = later.messages.map((message) => JSON.stringify(message)).join("\n")
+      assert.match(text, /locked after a context handover/)
+      assert.match(text, /cannot answer questions/)
+      assert.match(text, /Context handover \(incomplete\):.*locked after/)
+      assert.ok(!text.includes("legacy summary legacy"))
+      const read = fake.tools.get("read_handover")
+      assert.ok(read)
+      fake.sessions.set("ses_reader", { id: "ses_reader", agent: "build", history: [] })
+      const out = await read.execute({ sessionID: "ses_legacy" }, { sessionID: "ses_reader", agent: "build" })
+      assert.match(String(out.content), /legacy body/)
+      assert.match(String(out.content), /Diagnostics: reason=unknown, stage=unknown, estimated-context-tokens=unknown, soft-limit=unknown/)
+    })
+
+    it("requires honest status in the shared template without rewriting stored text", async () => {
+      assert.ok(HANDOVER_DESCRIPTION.includes("instruction deviations"))
+      assert.ok(HANDOVER_DESCRIPTION.includes("stop conditions"))
+      assert.ok(HANDOVER_DESCRIPTION.includes("failed or erroring calls"))
+      assert.ok(HANDOVER_DESCRIPTION.includes("unverified claims"))
+      assert.ok(HANDOVER_DESCRIPTION.includes("never mark work PASS or complete"))
+      assert.ok(HANDOVER_DESCRIPTION.includes("summary must not claim more than the body"))
+    })
+
+    it("locks the child directive text to the exact builder", async () => {
+      const built = buildLockedChildDirective("subagent handover returned to parent", "ses_exact")
+      assert.ok(built.includes(JSON.stringify("ses_exact")))
+      assert.match(built, /locked after a context handover/)
+      assert.match(buildLockedChildReturn("ses_exact"), /^Context handover \(incomplete\):/)
+    })
+  })
+
+  describe("handover diagnostics", () => {
+    it("marks nudged handovers with stage, estimate, and soft from the pre-call snapshot", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_nudged", {
+        id: "ses_diag_nudged",
+        agent: "build",
+        history: [assistantMessage({ input: 900, output: 100, reasoning: 50, cache: { read: 0, write: 0 } })],
+      })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_nudged", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_nudged", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_nudged") as { diag: { reason: string; stage: string; estimate: number; soft: number } }
+      assert.equal(stored.diag.reason, "nudged")
+      assert.equal(stored.diag.stage, "warn1")
+      assert.equal(stored.diag.estimate, 1050)
+      assert.equal(stored.diag.soft, 1000)
+      fake.sessions.set("ses_diag_reader", { id: "ses_diag_reader", agent: "build", history: [] })
+      const read = fake.tools.get("read_handover")
+      assert.ok(read)
+      const out = await read.execute({ sessionID: "ses_diag_nudged" }, { sessionID: "ses_diag_reader", agent: "build" })
+      assert.match(String(out.content), /Diagnostics: reason=nudged, stage=warn1, estimated-context-tokens=1050, soft-limit=1000/)
+    })
+
+    it("marks quiet handovers not-nudged with the ok stage snapshot", async () => {
+      const fake = makeFake({ soft: 100000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_quiet", {
+        id: "ses_diag_quiet",
+        agent: "build",
+        history: [assistantMessage({ input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_quiet", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_quiet", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_quiet") as { diag: { reason: string; stage: string } }
+      assert.equal(stored.diag.reason, "not-nudged")
+      assert.equal(stored.diag.stage, "ok")
+    })
+
+    it("uses the snapshot, not the handover payload size, and stays unknown when unmeasurable", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_snap", {
+        id: "ses_diag_snap",
+        agent: "build",
+        history: [assistantMessage({ input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_snap", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      const big = "x".repeat(20000)
+      await handover.execute({ handover: big, summary: "s" }, { sessionID: "ses_diag_snap", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_snap") as { diag: { estimate: number } }
+      assert.equal(stored.diag.estimate, 900 + 100)
+      fake.sessions.set("ses_diag_unknown", { id: "ses_diag_unknown", agent: "build", history: [] })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_unknown", {}) as unknown as Record<string, unknown>)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_unknown", agent: "build" })
+      const missing = fake.storage.get("auto-context-handover:handover:ses_diag_unknown") as { diag: { reason: string; stage: string; estimate: unknown; soft: unknown } }
+      assert.equal(missing.diag.reason, "unknown")
+      assert.equal(missing.diag.stage, "unknown")
+      assert.equal(missing.diag.estimate, "unknown")
+      assert.equal(missing.diag.soft, 1000)
+    })
+
+    it("keeps reason unknown with no snapshot and preserves known soft", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_nosnap", { id: "ses_diag_nosnap", agent: "build", history: [] })
+      // Fresh instance observes the soft but has no usable usage anchor.
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_nosnap", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_nosnap", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_nosnap") as { diag: { reason: string; stage: string; estimate: unknown; soft: number } }
+      assert.equal(stored.diag.reason, "unknown")
+      assert.equal(stored.diag.stage, "unknown")
+      assert.equal(stored.diag.estimate, "unknown")
+      assert.equal(stored.diag.soft, 1000)
+    })
+
+    it("adds trailing chars at chars/4 without changing nudge text", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_trail", {
+        id: "ses_diag_trail",
+        agent: "build",
+        history: [assistantMessage({ input: 900, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }, 400)],
+      })
+      const event = contextEvent("ses_diag_trail", { bash: {} })
+      await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
+      assert.equal(event.messages.length, 1)
+      const before = JSON.stringify(event.messages[0])
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_trail", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_trail") as { diag: { estimate: number; stage: string; reason: string } }
+      assert.equal(stored.diag.estimate, 1000 + Math.ceil(400 / 4))
+      assert.equal(stored.diag.stage, "warn2")
+      assert.equal(stored.diag.reason, "nudged")
+      assert.equal(JSON.stringify(event.messages[0]), before)
+    })
+
+    it("resolves cap, later stages, and hard in diagnostics only", async () => {
+      const fake = makeFake({ soft: 190000, hard: 195000 })
+      await setup(fake)
+      const ctx = fake.ctx as unknown as {
+        model: { list: () => Promise<{ location: Record<string, unknown>; data: Array<{ providerID: string; id: string; limit: { context: number; input: number } }> }> }
+      }
+      ctx.model.list = async () => ({
+        location: {},
+        data: [{ providerID: "anthropic", id: "claude", limit: { context: 100000, input: 100000 } }],
+      })
+      fake.sessions.set("ses_diag_cap", {
+        id: "ses_diag_cap",
+        agent: "build",
+        history: [assistantMessage({ input: 74000, output: 1000, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      const event = contextEvent("ses_diag_cap", { bash: {} })
+      await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
+      assert.equal(event.messages.length, 1)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_cap", agent: "build" })
+      const capped = fake.storage.get("auto-context-handover:handover:ses_diag_cap") as { diag: { soft: number; stage: string; reason: string } }
+      assert.equal(capped.diag.soft, 70000)
+      assert.equal(capped.diag.stage, "warn1")
+      assert.equal(capped.diag.reason, "nudged")
+      fake.sessions.set("ses_diag_hard", {
+        id: "ses_diag_hard",
+        agent: "build",
+        history: [assistantMessage({ input: 194000, output: 2000, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      const hardEvent = contextEvent("ses_diag_hard", { bash: {}, context_handover: {} })
+      await fake.hooks.get("context")?.(hardEvent as unknown as Record<string, unknown>)
+      assert.deepEqual(Object.keys(hardEvent.tools), ["context_handover"])
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_hard", agent: "build" })
+      const hard = fake.storage.get("auto-context-handover:handover:ses_diag_hard") as { diag: { stage: string; reason: string } }
+      assert.equal(hard.diag.stage, "hard")
+      assert.equal(hard.diag.reason, "nudged")
+    })
+
+    it("keeps an estimate when the soft window is unknown", async () => {
+      const fake = makeFake({ soft: "70%" })
+      await setup(fake)
+      fake.sessions.set("ses_diag_pct", {
+        id: "ses_diag_pct",
+        agent: "build",
+        history: [assistantMessage({ input: 5000, output: 500, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      const event = contextEvent("ses_diag_pct", { bash: {} }, { providerID: "unknown", id: "nope" })
+      await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
+      assert.equal(event.messages.length, 0)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "tiny", summary: "s" }, { sessionID: "ses_diag_pct", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_pct") as { diag: { estimate: number; soft: unknown; stage: string; reason: string } }
+      assert.equal(stored.diag.estimate, 5500)
+      assert.equal(stored.diag.soft, "unknown")
+      assert.equal(stored.diag.stage, "unknown")
+      assert.equal(stored.diag.reason, "unknown")
+    })
+
+    it("observes the latest pre-call request, never the handover payload", async () => {
+      const fake = makeFake({ soft: 1000 })
+      await setup(fake)
+      fake.sessions.set("ses_diag_latest", {
+        id: "ses_diag_latest",
+        agent: "build",
+        history: [assistantMessage({ input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_latest", {}) as unknown as Record<string, unknown>)
+      fake.sessions.set("ses_diag_latest", {
+        id: "ses_diag_latest",
+        agent: "build",
+        history: [assistantMessage({ input: 5000, output: 500, reasoning: 0, cache: { read: 0, write: 0 } })],
+      })
+      await fake.hooks.get("context")?.(contextEvent("ses_diag_latest", {}) as unknown as Record<string, unknown>)
+      const handover = fake.tools.get("context_handover")
+      assert.ok(handover)
+      await handover.execute({ handover: "x".repeat(50000), summary: "s" }, { sessionID: "ses_diag_latest", agent: "build" })
+      const stored = fake.storage.get("auto-context-handover:handover:ses_diag_latest") as { diag: { estimate: number; reason: string } }
+      assert.equal(stored.diag.estimate, 5500)
+      assert.equal(stored.diag.reason, "nudged")
     })
   })
 })

@@ -16,8 +16,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\""
   },
   "dependencies": {
     "@opencode/ai": "2.1.4",

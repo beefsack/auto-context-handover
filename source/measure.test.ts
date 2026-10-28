@@ -17,6 +17,8 @@ import {
   selectThresholdValue,
   stageOf,
 } from "./measure.ts"
+import { openCodeStageText, softStage } from "./shared/handover-text.ts"
+import { buildNudge } from "./text.ts"
 
 describe("parseThreshold", () => {
   it("accepts percent strings", () => {
@@ -197,6 +199,23 @@ describe("stageOf", () => {
     assert.equal(stageOf(168000, 140000), "warn3")
     assert.equal(stageOf(999999, 140000, 500000), "hard")
     assert.equal(stageOf(100, 140000, 500000), "ok")
+  })
+
+  it("shares boundaries and leads with the Claude staged nudge", () => {
+    assert.equal(softStage(999, 1000), "ok")
+    assert.equal(softStage(1000, 1000), "warn1")
+    assert.equal(softStage(1099, 1000), "warn1")
+    assert.equal(softStage(1100, 1000), "warn2")
+    assert.equal(softStage(1199, 1000), "warn2")
+    assert.equal(softStage(1200, 1000), "warn3")
+    for (const estimate of [999, 1000, 1099, 1100, 1199, 1200, 5000]) {
+      const shared = softStage(estimate, 1000)
+      const open = stageOf(estimate, 1000)
+      assert.equal(shared, open === "hard" ? "warn3" : open, `estimate ${estimate}`)
+    }
+    assert.equal(buildNudge("warn1"), openCodeStageText("warn1"))
+    assert.equal(buildNudge("warn2"), openCodeStageText("warn2"))
+    assert.equal(buildNudge("warn3"), openCodeStageText("warn3"))
   })
 })
 

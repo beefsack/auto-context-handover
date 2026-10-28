@@ -2,40 +2,46 @@
 // numbers, so nudges stay stable across requests.
 
 import type { Stage } from "./measure.ts"
+import {
+  buildChildContinuationReply,
+  buildLockedChildFollowup,
+  CHILD_ROLLOVER_GUIDANCE,
+  CHILD_SUMMARY_PREFIX,
+  HANDOVER_SECTIONS,
+  openCodeStageText,
+  SEED_FRAMING,
+  withChildSummaryPrefix,
+} from "./shared/handover-text.ts"
 
-export const HANDOVER_DESCRIPTION = `Call this tool only after the plugin nudges you about the context limit, or when the user explicitly asks for a handover. Do not call it just to finish a task; give a normal final response instead. Once nudged, call exactly once per session when you are done with the current unit of work, then stop. Pass the FULL handover text VERBATIM in "handover" (it is stored and replayed word for word, never summarized or reworded) plus a short status/outcome/next-step summary in "summary".
+const HANDOVER_LEAD = `Call this tool only after the plugin nudges you about the context limit, or when the user explicitly asks for a handover. Do not call it just to finish a task; give a normal final response instead. Once nudged, call exactly once per session when you are done with the current unit of work, then stop. Pass the FULL handover text VERBATIM in "handover" (it is stored and replayed word for word, never summarized or reworded) plus a short status/outcome/next-step summary in "summary".`
 
-Write the handover with these sections:
-1. Original instructions, role, and constraints (verbatim where it matters): role; active user scope and critical rules/prohibitions verbatim, or verified reload instructions (file/skill); agent, provider/model/variant, permissions/tool restrictions, config scope, delegation/question/commit limits.
-2. Completed work and decisions: changed files; explicit user decisions vs implicitly accepted proposals vs agent-adopted choices; separate direct verification (command/result) from others' reports (source), live observations, and unverified work.
-3. In-progress work and exact current state: exact stopping point, unresolved risks, continuation/compaction status, known predecessor session ID chain; flag history gaps.
-4. Key snippets (short, copyable): only essential snippets.
-5. Negative knowledge: explicit dead ends, failed approaches, what NOT to try again.
-6. Prioritized next steps for the successor session.
+const HANDOVER_TAIL = `Do not paste secrets. What happens next depends on this session's policy, not on this call: a primary root session rotates to a fresh session seeded from your text; a subagent (child) session only stores the text, locks, and returns your short summary to its parent; with onHandover.primary=lock the session locks with no successor at all. A locked session refuses further handover calls.`
 
-Prefer durable docs over repeated background; omit personal trivia; never trim unresolved risks or verification distinctions; mark unknowns rather than inventing history/controls. Keep concise and avoid repetitive prose.
+const HANDOVER_CHILD_DEFAULT =
+  `Child continuation default: this is a context rollover, not task completion. ` +
+  `Child summaries must start with ${JSON.stringify(CHILD_SUMMARY_PREFIX)}. ` +
+  `The parent normally continues in a same-agent-type successor seeded with the original task pointer and the full handover. ` +
+  `${SEED_FRAMING} ` +
+  `Redirection remains allowed. ` +
+  `Never turn context size or remaining volume into user questions; put remaining work in prioritized executable next steps. ` +
+  `Ask the user only about handover-listed user-owned decisions unrelated to context size.`
 
-Do not paste secrets. What happens next depends on this session's policy, not on this call: a primary root session rotates to a fresh session seeded from your text; a subagent (child) session only stores the text, locks, and returns your short summary to its parent; with onHandover.primary=lock the session locks with no successor at all. A locked session refuses further handover calls.`
+export const HANDOVER_DESCRIPTION = `${HANDOVER_LEAD}\n\n${HANDOVER_SECTIONS}\n\n${HANDOVER_TAIL}\n\n${HANDOVER_CHILD_DEFAULT}`
 
 export function buildNudge(stage: Stage): string {
   switch (stage) {
     case "warn1":
-      return (
-        `Auto-context-handover notice. Context is filling. ` +
-        `Finish the current unit of work, then call the context_handover tool with the full handover text. ` +
-        `Do not start new work after this unit.`
-      )
+      return openCodeStageText("warn1")
     case "warn2":
-      return (
-        `Auto-context-handover warning. Wrap up now: complete only the step in progress, ` +
-        `then call the context_handover tool with the full handover text. Starting new work risks losing state to compaction.`
-      )
+      return openCodeStageText("warn2")
     default:
-      return (
-        `Auto-context-handover final warning. Stop after this step and call the context_handover tool ` +
-        `with the full handover text. Do not defer the handover past this response.`
-      )
+      return openCodeStageText("warn3")
   }
+}
+
+/** Child-framed nudge for real subagent sessions; root buildNudge output is unchanged. */
+export function buildChildNudge(stage: Stage): string {
+  return `${buildNudge(stage)} ${CHILD_ROLLOVER_GUIDANCE}`
 }
 
 export function buildHardDirective(hardTokens?: number): string {
@@ -47,6 +53,11 @@ export function buildHardDirective(hardTokens?: number): string {
   )
 }
 
+/** Child-framed hard directive for real subagent sessions; root output is unchanged. */
+export function buildChildHardDirective(hardTokens?: number): string {
+  return `${buildHardDirective(hardTokens)} ${CHILD_ROLLOVER_GUIDANCE}`
+}
+
 export function buildLockedDirective(reason: string, sessionID: string): string {
   return (
     `Session handed over and locked (${reason}). ` +
@@ -56,9 +67,24 @@ export function buildLockedDirective(reason: string, sessionID: string): string 
   )
 }
 
+export function buildLockedChildReturn(sessionID: string): string {
+  return buildLockedChildFollowup(
+    `read the full handover with read_handover({"sessionID":${JSON.stringify(sessionID)}})`,
+  )
+}
+
+export function buildLockedChildDirective(reason: string, sessionID: string): string {
+  return (
+    `Session handed over and locked (${reason}). ` +
+    `All tools are disabled. ` +
+    `Emit ONLY the following locked reply and then stop; do not answer questions, call tools, or continue work: ${buildLockedChildReturn(sessionID)}`
+  )
+}
+
 export function buildSuccessorSeed(handover: string, sourceSessionID: string): string {
   return (
     `Continuing work handed over from session ${sourceSessionID}. ` +
+    `${SEED_FRAMING} ` +
     `If anything below is unclear, read the full stored handover with the read_handover tool for session ${sourceSessionID}.\n\n` +
     `--- handover from session ${sourceSessionID} ---\n${handover}\n--- end of handover ---`
   )
@@ -66,13 +92,6 @@ export function buildSuccessorSeed(handover: string, sourceSessionID: string): s
 
 export function buildForwardNotice(newSessionID: string): string {
   return `Work continued in session ${newSessionID}. This session is handed over and locked; continue there.`
-}
-
-export function buildLockedFinalReply(reason: string, finalReply: string): string {
-  return (
-    `Session handed over and locked (${reason}). ` +
-    `Emit ONLY the following short final reply and then stop; do not call any tools or continue work: ${finalReply}`
-  )
 }
 
 export function buildLockModeNotice(sessionID: string, reason: string): string {
@@ -84,9 +103,8 @@ export function buildLockModeNotice(sessionID: string, reason: string): string {
 }
 
 export function buildSubagentReturn(summary: string, sessionID: string): string {
-  return (
-    `${summary}\n\nHandover stored for subagent session ${sessionID}. ` +
-    `Use the read_handover tool with sessionID ${JSON.stringify(sessionID)} to read the full text. ` +
-    `This session ends here; the parent agent decides how to continue.`
+  return buildChildContinuationReply(
+    withChildSummaryPrefix(summary),
+    `read the full handover with read_handover({"sessionID":${JSON.stringify(sessionID)}})`,
   )
 }

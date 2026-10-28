@@ -1,0 +1,14 @@
+{
+  "name": "auto-context-handover",
+  "owner": {
+    "name": "beefsack"
+  },
+  "description": "Subagent-only context handover adapter (Claude Code mod).",
+  "plugins": [
+    {
+      "name": "auto-context-handover",
+      "source": "./",
+      "description": "Subagent-only context handover for Claude Code: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children. Root sessions are untouched."
+    }
+  ]
+}
