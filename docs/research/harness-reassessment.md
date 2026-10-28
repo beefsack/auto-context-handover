@@ -7,7 +7,7 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 | Harness | Verdict | Rank | Relative effort |
 | --- | --- | --- | --- |
 | Cline via hook-bearing AgentExtension (`@cline/core` 0.2.0; subsequent official CLI pin `cline@3.0.74`) | [Root advisory/manual MVP shipped](cline.md) | 1 | S (at or below Pi; below Crush/Codex) |
-| Amp (`@ampcode/plugin` 0.0.0-20261028101742-g93a0da1) | Feasible advisory-first MVP | 2 | M (above Pi, near Crush) |
+| Amp (`@ampcode/plugin` 0.0.0-20261028101742-g93a0da1) | [Focused-root advisory MVP shipped](amp.md) | 2 | M (above Pi, near Crush) |
 | Goose (source `block/goose@ee8500d`) | Conditional MVP only (poll + denial gate + manual continuation) | 3 | M (wiring cost, no host feature work) |
 | Cursor editor / CLI | Blocked for measured pre-compaction MVP; storage/manual-only integration feasible in editor, CLI trigger unverified | - | M if measurement unblocked (MCP + hooks, above Pi) |
 | Roo Code | Dead harness, not worth building | - | - |
@@ -29,6 +29,11 @@ The following screen's CLI-unpinned caveat is historical, not a current blocker.
 - Subagents: CLI/Desktop `spawn_agent` with own window and final reply; the VS Code file-hook path has no established child measurement/attribution workflow in this assessment ([plugins](https://docs.cline.bot/sdk/plugins)).
 
 ## Amp: feasible advisory-first MVP
+
+Subsequent [Amp implementation and offline-load evidence](amp.md) supersede
+this screen's manual-follow posture: source `thread.agent()` can create a fresh
+root and append its continuation from successful turn end. Actual authenticated
+continuation/client following remain unverified.
 
 - Measurement: no usage/token getter in the shipped declarations ([index.d.ts](https://unpkg.com/@ampcode/plugin@0.0.0-20261028101742-g93a0da1/index.d.ts)); only `CreateAgentConfig.compactionThresholdTokens` (default configured percentage, 90%). Estimator: page default-view `thread.messages()` (what a new inference turn sees) at `agent.start`/`tool.result` boundaries, apply `chars/4` over visible text. `full:true` includes compacted-away history and MUST NOT be counted as the active window. The text-only estimator excludes system prompt, tool schemas, and deferred modules, so it may undercount; it is not a mathematical lower bound ([api](https://ampcode.com/docs/plugin-api)).
 - Injection: `agent.start` return `{message}`, `tool.result` handling, `thread.append` / `appendUserMessage` (`steer:true` queueing), `changes.prompt` append; turn/tool granularity only, no per-request hook ([plugins](https://ampcode.com/docs/customize/plugins)).

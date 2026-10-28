@@ -7,7 +7,8 @@ manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adap
 and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
-[Cline CLI/SDK root adapter](#cline-clisdk-root-adapter).
+[Cline CLI/SDK root adapter](#cline-clisdk-root-adapter), plus an
+[Amp focused-root adapter](#amp-focused-root-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -155,6 +156,56 @@ calls before completion.
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
   only warns.
+
+## Amp (focused-root adapter)
+
+Targets `@ampcode/plugin@0.0.0-20261028101742-g93a0da1`; offline load checked
+with Amp CLI `0.0.1793203246-g5eab6d`. Amp runs TypeScript directly; no build
+or runtime package import is needed. Keep this checkout intact (shared imports
+are outside `amp/`). Create this real forwarding file in
+`$XDG_CONFIG_HOME/amp/plugins/auto-context-handover/index.ts`, or
+`~/.config/amp/plugins/auto-context-handover/index.ts` when XDG is unset:
+
+```ts
+export { default } from "/absolute/path/to/auto-context-handover/amp/index.ts";
+```
+
+Use the `plugins: reload` palette command after changing it; `amp plugins list`
+lists registered plugins when connected. Do not copy only `amp/index.ts`.
+
+- **Focused parentless threads only.** Host thread handles bind writes; known
+  children, background threads and unknown focus/parentage cannot hand over.
+  Deleted parents can appear parentless; this is not universal child detection.
+- `agent.start` appends an introduction and any notice after user content;
+  `tool.result` appends notices to supported string/text-block outputs without
+  changing their status. No system-priority claim. Active inference-view text,
+  thinking, tool inputs/results use chars/4, never compacted-away history.
+  System prompt, tool schemas, deferred modules and image tokens are excluded:
+  this can undercount and is not a mathematical lower bound or exact usage.
+- `AUTO_CONTEXT_HANDOVER_SOFT` accepts positive integer tokens only, default
+  `150000`, uncapped (window unknown). Set below the model's compaction budget
+  before launching Amp. Invalid/empty values log and disable notices, not tools.
+  Shared stages apply at soft, soft x 1.1 and soft x 1.2; unknowns fail open.
+- The model calls `context_handover({handover, summary})` after a notice or
+  explicit handover request, then ends its turn. First successful write wins;
+  both strings remain verbatim. At a successful `agent.end`, while still focused
+  and parentless, the source agent creates a fresh root with `show:true` and
+  receives one full seed automatically. No model is selected/overridden;
+  exact setting preservation and client UI following remain unverified.
+- Storage: `~/.amp/auto-context-handover/<sha256(thread-id)>/`, following HOME
+  rather than XDG. New directories/files 0700/0600; immutable handover/claim,
+  separate best-effort continuation status. No quota/TTL/eviction/deletion
+  cleanup or fsync guarantee; same-user files are not a sandbox.
+- Reload, cancellation, focus changes or failures can require manual recovery:
+  in an equipped fresh thread use
+  `Call read_handover({"threadID":"SOURCE_ID"}) and continue from "Prioritized next steps".`
+  Inspect recorded status/existing successors first: uncertain create/seed
+  admission is never automatically retried. A claim prevents duplicate attempts.
+  Any equipped caller can read any retained id. Oversized seeds warn only.
+- No source lock, forced stop, hard gate or child workflow. Native compaction
+  is unchanged and may precede a notice. Offline load and fixtures do not prove
+  authenticated routing, model compliance or continuation.
+  [Capabilities and evidence](docs/research/amp.md).
 
 ## Cline CLI/SDK (root adapter)
 

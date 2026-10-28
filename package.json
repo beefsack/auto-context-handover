@@ -11,6 +11,7 @@
     "tui.ts",
     "source",
     "aiderdesk",
+    "amp",
     "cline",
     "codex",
     "copilot",
@@ -38,8 +39,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json && tsc --noEmit -p aiderdesk/tsconfig.json && tsc --noEmit -p cline/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\" \"aiderdesk/**/*.test.ts\" \"cline/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json && tsc --noEmit -p aiderdesk/tsconfig.json && tsc --noEmit -p cline/tsconfig.json && tsc --noEmit -p amp/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\" \"aiderdesk/**/*.test.ts\" \"cline/**/*.test.ts\" \"amp/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@aiderdesk/extensions": "0.39.0",
+    "@ampcode/plugin": "0.0.0-20261028101742-g93a0da1",
     "@cline/sdk": "0.2.0",
     "@github/copilot-sdk": "1.0.28",
     "@mariozechner/pi-coding-agent": "0.73.1",

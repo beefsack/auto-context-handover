@@ -166,6 +166,29 @@ or successful fresh-session continuation. Native children are out of scope.
 | 11 | HOME-based private new directories/files 0700/0600, hashed source ids, atomic immutable first-writer publication. No quota/TTL/eviction/deletion cleanup/fsync guarantee; temps may remain. Latest request diagnostics, unknown after reload. |
 | 12 | Full readback only; any equipped caller (including children) may read any retained id, no arbitrary path or parent-only policy. Host-bound root snapshot authorizes writes, repeated instance setup refused. Effective model/override unknown, not inferred from authored prose. |
 
+## Amp focused-root MVP
+
+Pinned `@ampcode/plugin@0.0.0-20261028101742-g93a0da1`, offline CLI loader
+`0.0.1793203246-g5eab6d`: [capabilities and citations](research/amp.md).
+**Fixture-covered** is not model compliance; authenticated routing, UI following
+and automatic continuation are unverified. Known children/backgrounds excluded;
+parent deletion can make a former child indistinguishable from a root.
+
+| # | Amp status against the requirement above |
+| --- | --- |
+| 1 | `agent.start.message` introduction after user content; later tool-result notices reference it. No system-prefix rewrite/priority claim; fixture-covered. |
+| 2 | Direct registered context_handover/read_handover; offline import/registration observed. Actual in-session names, exposure and loader policy remain unverified. |
+| 3 | Intro/notices define current-step/final-report precedence and intro permits plugin-storage writes under read-only tasks. Advisory, fixture-covered. |
+| 4 | Active inference-view paged transcript chars/4 plus missing current prompt/result; not full history/billing. Fixed stages; integer soft 150000 uncapped, no window/percent support; unknowns silent. Image/system/schema/deferred overhead omitted. No gate. |
+| 5 | Successful source turn end after storage attempts fresh-root creation/seeding automatically, no confirmation. Fixture-covered only; no child parent-default workflow. |
+| 6 | n/a child replacement. Source thread.agent() handle creates new root without selecting a model; exact settings/overrides preservation unverified. |
+| 7 | n/a child handback. Writer advises ending turn; successful agent.end triggers continuation. Source stop compliance unverified, no interception. |
+| 8 | No source lock/stop correction. Exclusive durable attempt claim prevents automatic repeat; reload/error/focus loss can need manual recovery. Uncertain admission requires thread inspection, never blind retry. |
+| 9 | Full verbatim seed once, source-id backlink/shared no-repeat/predecessor-evidence/title framing. Manual reader reference available; no original-task capture, child lineage or forward-link transaction. |
+| 10 | Seed >50% soft warns/advises compression only; no fixed cap/productivity classification. Stored text unchanged. |
+| 11 | HOME private hashed-id files, immutable body/claim and best-effort result status; no quota/TTL/eviction/deletion cleanup/fsync promise. Latest boundary estimate/stage/notice-append reason; lost diagnostics unknown. |
+| 12 | Full readback only; any equipped caller can read any retained thread id. Host-bound source id wins over prose; effective model/override/chain unknown. No arbitrary path or parent-only reader policy. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -187,6 +210,9 @@ or successful fresh-session continuation. Native children are out of scope.
 - Cline intentionally differs: root full-request heuristic and direct SDK hooks,
   HOME-based file storage and manual reference continuation; no hook-window
   resolution, automatic creation, child workflow or source lock.
+- Amp intentionally differs: focused-parentless active-view estimation and
+  successful-turn-end automatic root attempt using the source agent; no source
+  lock, universal child detection, known window or authenticated routing proof.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
