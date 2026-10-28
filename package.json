@@ -10,7 +10,11 @@
     "index.ts",
     "tui.ts",
     "source",
+    "codex",
     "pi",
+    "plugin.json",
+    "mcp.json",
+    ".codex-plugin",
     "README.md"
   ],
   "pi": {
@@ -22,10 +26,11 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p pi/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"pi/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p pi/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"pi/**/*.test.ts\""
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@opencode/ai": "2.1.4",
     "@opencode/schema": "2.1.4",
     "effect": "4.0.1",

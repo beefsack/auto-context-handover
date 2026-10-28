@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "auto_context_handover": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["--experimental-strip-types", "${PLUGIN_ROOT}/codex/server.ts"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "auto-context-handover",
+  "version": "0.1.0",
+  "description": "Subagent-only context handover for Codex: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children.",
+  "extensions": {
+    "com.openai": {
+      "hooks": ["./codex/hooks.json"]
+    }
+  }
+}

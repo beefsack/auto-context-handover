@@ -3,7 +3,8 @@
 Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 
 Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
-manual command rollover) and a [Claude child adapter](#claude-code-subagent-only-adapter).
+manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
+and a [Claude child adapter](#claude-code-subagent-only-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -204,6 +205,69 @@ pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
 
 Pinned contracts, command-dispatch caveat, checklist and reproducible non-model
 checks: [Pi assessment](docs/research/pi.md).
+
+## Codex CLI (subagent-first adapter)
+
+Targets `@openai/codex@0.165.0`. Run `npm install` in this repository first;
+Node >=22.18 is required. No build or OpenCode host is involved. Register the
+existing repository marketplace and install the root plugin:
+
+```sh
+npx --yes @openai/codex@0.165.0 plugin marketplace add /absolute/path/to/auto-context-handover
+npx --yes @openai/codex@0.165.0 plugin add auto-context-handover@auto-context-handover
+npx --yes @openai/codex@0.165.0 mcp get auto_context_handover
+```
+
+Review and trust the installed hooks in Codex `/hooks` before expecting them to
+run. Installation alone does not trust them. Code/definition changes can require
+renewed hash review; do not bypass trust as an installation shortcut. Codex uses
+an installed copy, not this working tree. Complete dependency installation before
+trust review; if a distribution omitted `node_modules`, install dependencies in
+that installed plugin copy as well.
+
+- **Pinned-source caveat:** measurement depends on synchronous
+  `PostModelRequest`, present in `rust-v0.165.0` but not in the public hook event
+  list. It observes latest-response input + output (cache/reasoning are subsets),
+  then appends shared staged notices at supported tool boundaries. It does not
+  poll JSONL or claim a pre-request injection/gate. Unknown usage suppresses
+  notices; compaction clears measurements without changing native compaction.
+- Set `AUTO_CONTEXT_HANDOVER_SOFT` in the environment before launching Codex.
+  It accepts positive integer tokens, default `150000`, with fixed stages at
+  soft, soft x 1.1 and soft x 1.2. No percentage/cap: the child window is unknown.
+  Invalid values error and make hook-bound tools unavailable, not silently default.
+- Root SessionStart introduces the configured read-then-replace workflow;
+  roots can read but cannot store handovers and are not measured/nudged/rotated.
+  Thread-spawn children receive a start introduction. After a notice, finish
+  the current step and call
+  `mcp__auto_context_handover__context_handover({handover,summary})`, then end
+  the turn with exactly its receipt as the final native message. The stored
+  handover replaces that session's final report; plugin-storage writes remain
+  permitted under read-only task instructions before handover.
+- Parent readback:
+  `mcp__auto_context_handover__read_handover({"childId":"CHILD_ID"})` returns
+  compact diagnostics, host-observed provenance and next-step excerpt. Use
+  `full:true` for the verbatim handover once; pending user decisions are unknown
+  until full read. Pass the reader's short full-read prompt to the same-type
+  successor, not the full handover. The parent retains its original task and
+  requested model-override parameters; the adapter does not capture them or
+  infer overrides from the effective model. No original-task capture or lineage.
+- Calls are bound to host identity by a synchronous PreToolUse single-use
+  capability, not a model-supplied caller id. Unbound calls fail if hooks are
+  absent/untrusted/disabled. Any live bound caller may read any stored child id;
+  closed callers cannot read or work. This is not an OS-user filesystem sandbox.
+- Verbatim text/summary and closure persist together in private PLUGIN_DATA
+  files. No quota, TTL or automatic eviction. Consumed capabilities are removed;
+  abandoned pending requests and crash-leftover temporary files can remain.
+  Deleting plugin data also deletes history and closure. Atomic publication is
+  not an fsync/crash-durability guarantee.
+- No root rollover, automatic successor spawn, hard token gate or classifier
+  handback. Closure denial covers supported tool paths only; final text and one
+  stop correction are advisory, not deterministic parent delivery. Installation,
+  MCP registration and fixtures are verified without a model; hook execution,
+  model compliance and end-to-end continuation remain unverified.
+
+Primary-source capability table, requirements checklist and reproducible
+isolated commands: [Codex assessment](docs/research/codex.md).
 
 ## Claude Code (subagent-only adapter)
 

@@ -1,0 +1,6 @@
+{
+  "name": "auto-context-handover",
+  "description": "Subagent-only context handover for Codex: measures child loops, nudges with staged escalation at the soft boundary, stores the model-written handover, and stops handed-over children.",
+  "version": "0.1.0",
+  "hooks": "./codex/hooks.json"
+}

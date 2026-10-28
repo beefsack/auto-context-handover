@@ -55,12 +55,37 @@ The root-only scope is deliberate: Pi has no core child primitive.
 | 11 | Session custom entries in Pi-owned JSONL; active-branch latest lookup; no quota/eviction policy. Ephemeral sessions memory-only; host writes nontransactional. Diagnostics from latest request hook, unknown after reload; fixture-covered. |
 | 12 | n/a parent/successor split. Current-branch-only reader takes no target arguments. Source session/effective model are recorded by the host-facing tool, not authored provenance; no model-override claim. Successor receives full seed. |
 
+## Codex subagent-first MVP
+
+Codex `0.165.0`, pinned source, caveats and non-model commands:
+[Codex assessment](research/codex.md). **Fixture-covered** never means model
+compliance. Installation/MCP registration was observed; real hook firing and
+parent continuation remain unverified. Roots are context/read-only.
+
+| # | Codex status against the requirement above |
+| --- | --- |
+| 1 | Root SessionStart and child SubagentStart extra developer context; later PostToolUse notices reference the introduction. Documented placement, fixture-covered text; trust/compliance unverified. |
+| 2 | Full MCP names in intro/notices; no deferred loader established. Both tools listed via SDK stdio. In-session exposure still depends on host policy. |
+| 3 | Current-step boundary, replacement of final report and read-only plugin-storage permission stated in intro/notices. Fixture-covered guidance. |
+| 4 | Latest input + output from source-only synchronous PostModelRequest, then fixed shared stages at PostToolUse boundaries. No cumulative usage or unstable transcript polling; unknowns fail open. No hard token gate. |
+| 5 | Root intro attributes read-then-replace without confirmation to installation default. Fixture-covered; no automatic spawn or live parent-compliance evidence. |
+| 6 | Same logical subagent and type/requested override via parent's original spawn params. Host type/effective model recorded; requested override remains unobserved, never inferred from usage. No lineage/type-preservation guarantee. |
+| 7 | Native final-text receipt plus bounded SubagentStop correction; source establishes mailbox delivery, not Claude classifier handback. Fixture-covered shaping, actual parent receipt unverified. |
+| 8 | Read-before-message recovery and never-resume rule in root intro; persistent closure denies supported tool calls. No universal stop/denial boundary for specialized paths or failed/disabled hooks. |
+| 9 | Short reader reference with explicit full read; shared reference/no-repeat/predecessor-trust framing. No captured original task, marker lineage or automatic successor classification. |
+| 10 | Shared >50%-of-soft seed warning with chars/4 estimate, compression advice and parent progress check-in; no fixed generation cap. Verbatim retained text. |
+| 11 | Private PLUGIN_DATA files, atomic immutable handover+closure, consumed capabilities removed. No quota/eviction/TTL; abandoned pending/temp files can remain. Latest-response diagnostics; unavailable fields unknown. |
+| 12 | Compact parent default, `full:true` successor payload once with host provenance and diagnostics. Pending decisions unknown, unsupported next-step extraction points to full. Any live host-bound caller can read any stored child id; closed callers denied. Single-use hook capability supplies caller binding, not model ids. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
 - Claude Code intentionally differs: roots are context-only (no measurement, nudging, handover action, gating or rollover); native compaction is unchanged.
 - Pi intentionally differs: root-oriented advisory workflow and manual command
   rollover; no core subagent integration or automatic event-driven replacement.
+- Codex intentionally differs: source-pinned observer plus tool-boundary notices,
+  hook-bound MCP calls and file storage; no original-task capture, child lineage,
+  requested-override observation or automatic parent spawning.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
