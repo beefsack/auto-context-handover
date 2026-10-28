@@ -100,6 +100,28 @@ below never establish model compliance or successful continuation.
 | 11 | Private files 0700/0600; immutable first-writer handover/summary/closure, separate recovery status. No quota/TTL/eviction; pending/temp files may remain. Diagnostics preserve known estimate/current stage/soft, but reason is always unknown: no notice-delivery provenance is persisted between hook processes. Missing fields unknown; no estimated-usage provenance from API. Fixture-covered. |
 | 12 | Full readback by sessionID, no compact mode. Any live host-bound root may read any retained id; closed callers denied. Single-use immutable-original-args capability, workspace/session correlation and explicit socket, not model ids or an OS-user sandbox. Fixture-covered; manually invoked hook/read checked separately from actual host firing. |
 
+## Copilot CLI subagent-first MVP
+
+`@github/copilot@1.0.105` experimental CLI extensions:
+[capabilities, citations and non-model evidence](research/copilot-cli.md).
+Installed plugin listing was observed. Shipped SDK contracts and synthetic
+fixtures do not establish actual callback routing, model compliance or receipt.
+
+| # | Copilot status against the requirement above |
+| --- | --- |
+| 1 | Session/child-start introductions via SDK hooks; later post-tool notices reference installation context. Documented placement, fixture-covered text; trust/compliance unverified. |
+| 2 | Direct extension tools, not MCP; defer:never keeps both descriptions available without a loader. Actual registration/visibility unverified. |
+| 3 | Current-step boundary, final-report precedence and plugin-storage writes under read-only tasks stated in guidance. Fixture-covered, not guaranteed priority. |
+| 4 | Latest child-attributed SDK currentTokens/tokenLimit (whole window, including system and tool definitions), fixed shared stages at soft, soft x 1.1, soft x 1.2. Capped integers/explicit percentages; unknowns silent. No hard token gate or accumulated billing totals. Real emission/cadence unverified. |
+| 5 | Root introduction attributes read-then-replace to installed workflow; no automatic spawn. Fixture-covered advisory default. |
+| 6 | Same logical child/type/requested override prescribed; host identity/type only, unknown override uses original spawn params. No observed count-limit semantics or model-override provenance. |
+| 7 | Native subagent-stop modifiedResponse replaces final parent-returned text with short receipt. Fixture-covered rewrite, actual receipt unverified. General-purpose has no start/stop hooks. |
+| 8 | No blocking retry loop: stop rewrite plus persistent closure denies attributed tools. Read-before-message/never-resume guidance; unsupported/disabled hooks and absent attribution are not universal lock enforcement. |
+| 9 | Reference reader seed, no-repeat/title-based/predecessor-evidence guidance. No captured original task, automatic successor classification or lineage. |
+| 10 | Reader warns when stored handover ceil(chars/4) exceeds 50% of recorded soft; unknown soft skips, reader headers/host overhead excluded. Compression advice only, verbatim text, no fixed generation cap; parent may check in on stalled/growing work. No original-task-once chain storage. |
+| 11 | Directories 0700/files 0600, immutable handover/closure via atomic exclusive publish; no quota/TTL/eviction or same-user sandbox. In-memory latest-window diagnostics unknown after reload. Both direct tools read closure strictly; ordinary hooks (including pre-tool denial) fail open on corrupt/unreadable closure. Adapter-owned failure handling, not a guarantee about uncaught SDK errors. |
+| 12 | Full readback only, no compact parent mode. Any live caller with tool access may read any retained child id; closed attributed callers denied. Host-bound provenance wins over authored identity; absent invocation attribution refuses handover. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -111,6 +133,10 @@ below never establish model compliance or successful continuation.
   requested-override observation or automatic parent spawning.
 - Crush intentionally differs: release PreToolUse-only root integration via an
   explicit Unix socket; lagged saved counters, no child hooks, no TUI following.
+- Copilot CLI intentionally differs: experimental standalone extension plugin,
+  current-window events rather than command-hook usage, native stop rewrite and
+  direct host-attributed tools. General-purpose lifecycle and unattributed
+  runtimes are unsupported; roots do not rotate.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

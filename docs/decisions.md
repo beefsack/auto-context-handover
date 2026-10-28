@@ -1,5 +1,11 @@
 # Decisions
 
+## GitHub Copilot CLI child-first MVP (2026-10-29)
+
+- (tentative, pending user review) Target `@github/copilot@1.0.105` experimental CLI extensions, using the host-bundled SDK via `joinSession`, not an SDK replacement harness. Latest child-attributed `session.usage_info.currentTokens` (whole window, including system messages and tool definitions) and `tokenLimit` drive tool-boundary stages with shared capped-integer/explicit-percent semantics, not an identical cross-harness estimator. Unknown/invalid measurements fail open and are not persisted. Roots receive continuation guidance/read access only; native compaction is unchanged. [Assessment](research/copilot-cli.md).
+- (tentative, pending user review) Package a standalone legacy plugin in `copilot/`, leaving existing root manifests intact. Host invocation identity binds handover tools; absent attribution refuses handover. Store immutable verbatim handover/closure in a dedicated private directory, without quotas/eviction; direct tools read closure strictly while ordinary hooks (including pre-tool denial) fail open on storage errors. Use native subagent-stop response replacement for short return, not a blocking retry loop. Parent continuation is advisory, seeded by reader reference; reader warns when handover-only ceil(chars/4) exceeds 50% of recorded soft, never gating or rewriting text. Original-task capture, lineage, requested-override observation and compact parent readback are absent. Preserve original spawn parameters rather than infer overrides; general-purpose lifecycle and real routing/compliance remain unverified.
+- (tentative, pending user review) Keep the installable extension JavaScript-only and self-contained, without a build or external runtime dependency. Mirror only dependency-free shared threshold/guidance/seed-size semantics with drift fixtures rather than broaden existing adapters or reference files outside the installed plugin directory. SDK development types check the extension contract; Copilot supplies the runtime SDK.
+
 ## OpenCode V2 MVP (2026-10-27)
 
 - Target OpenCode 2.1.4 only; local directory package `auto-context-handover`. Native `compaction.auto` stays enabled and unchanged.

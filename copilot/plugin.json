@@ -1,0 +1,7 @@
+{
+  "name": "auto-context-handover",
+  "version": "0.1.0",
+  "description": "Subagent-first measured context handover for GitHub Copilot CLI extensions.",
+  "license": "MIT",
+  "extensions": ["."]
+}

@@ -2,6 +2,12 @@
 
 Findings as of 2026-10-27. Scope: automatic measured soft limit plus ACTIVE-agent written handover as an alternative to compaction, for one repo with a harness-neutral core plus thin adapters, OpenCode V2 first.
 
+Copilot CLI refresh (2026-10-29): [1.0.105 child-first adapter](copilot-cli.md)
+supersedes its historical rows below. Experimental plugin-shipped extensions
+bridge host SDK usage events, tools and hooks. Shipped declarations establish
+current-window counts and child attribution; standalone installation was observed,
+not real callback routing, model compliance or parent receipt.
+
 Pi refresh (2026-10-28): [pinned assessment and implemented root MVP](pi.md).
 The installed/verified package is `@mariozechner/pi-coding-agent@0.73.1`,
 pi-mono `781152fc24841dc54b22284514604048ebe5e2c9`; earlier `1.4.0`/`6c384aa`

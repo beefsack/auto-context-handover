@@ -451,6 +451,56 @@ requirements checklist with per-adapter status and evidence. Antigravity CLI
 feasibility is assessed docs-only (blocked, no implementation) in
 [docs/research/antigravity-cli.md](docs/research/antigravity-cli.md).
 
+### GitHub Copilot CLI (subagent-first adapter)
+
+Targets **`@github/copilot@1.0.105` experimental CLI extensions** and Node >=22.18.
+Install the standalone Copilot directory, not the repository root (which exposes
+the Codex MCP server):
+
+```sh
+copilot plugin install ./copilot
+copilot plugin list --json
+copilot --experimental
+```
+
+From GitHub, use `copilot plugin install beefsack/auto-context-handover:copilot`.
+Direct installs currently warn of future marketplace-only support. Use
+`/extensions manage` to inspect extension startup; restart or `/clear` after
+updates. No build or runtime SDK installation: Copilot supplies its SDK.
+
+- Child-only measurement uses the latest attributed whole-window count
+  (including system messages and tool definitions), never billing totals.
+  `AUTO_CONTEXT_HANDOVER_SOFT` defaults to `150000`, capped at
+  70% of a known window; explicit percentages such as `70%` use that fraction.
+  Unknown/invalid usage stays silent. Staged notices appear after successful tools.
+- Both tools set `defer: "never"` to keep their descriptions available.
+  `context_handover` stores model-authored text verbatim and closes the child;
+  `read_handover({"childId":"..."})` returns full text and diagnostics. Native
+  subagent-stop rewriting supplies the short parent receipt without another
+  model turn. Parent guidance says read first, then replace with a same-type,
+  same-requested-override successor using the original spawn parameters and a
+  reader reference, never pasted handover text.
+- Readback warns when the stored handover's `ceil(chars/4)` estimate exceeds
+  50% of its recorded soft limit; unknown soft skips the warning. This excludes
+  reader headers/host overhead and only advises compressing finished notes at
+  the next handover; stored text stays verbatim.
+- Persistent files use a dedicated directory under `COPILOT_HOME` (otherwise
+  `~/.copilot`); `AUTO_CONTEXT_HANDOVER_DATA` overrides it. Use a trusted dedicated
+  directory; directory/file modes are 0700/0600, not a same-user sandbox.
+  No quota/TTL/eviction;
+  transient usage is unknown after reload. Root reads are allowed, but roots
+  are not nudged, handed over or rotated. Native compaction is unchanged.
+  Ordinary hook closure reads fail open on storage errors, so corrupt/unreadable
+  records can bypass hook denial; both direct adapter tools fail explicitly.
+- Experimental attribution must identify the child; absent attribution refuses
+  handover. Built-in general-purpose lacks start/stop lifecycle support. No
+  original-task capture, lineage or compact parent reader. Tool/extension
+  permissions and disabled hooks can prevent the workflow. Installation is
+  observed and policy fixture-tested; actual callbacks, model compliance,
+  never-resume enforcement across all paths and parent receipt are unverified.
+
+[Capabilities and non-model checks](docs/research/copilot-cli.md).
+
 ## Crush (root-session adapter)
 
 Targets **Crush v0.98.2 only**. Run `npm install` here first; Node >=22.18,
