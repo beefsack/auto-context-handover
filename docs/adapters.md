@@ -33,12 +33,35 @@ Lost transient diagnostics remain `unknown`; durable closure locks survive.
 | 11 | Storage quotas and diagnostics. Quota and retention behavior is per-adapter; do not promise every failure is explicit where fail-open is intentional. Readback shows adapter-defined diagnostics; unavailable fields read `unknown`, including legacy records and post-reload transient loss. | Session-keyed KV cleaned on session deletion (fixture-covered, not live-tested). Diagnostics from the pre-call snapshot including trailing chars/4. Context-hook lock/measurement reads deliberately fail open; mutation-tool reads are strict. | 4 MiB shared store; proposed writes above an estimated 3 MiB reclaim oldest eligible whole chains, retaining closure tombstones and reporting expired reads. Current/active/in-flight/uncertain chains are protected; legacy/untimestamped records sort first, spawn-only orphans participate in activity ordering. Latest-usage stage, independent nudge reason, delivery status, first-measured context and last consecutive request delta (negative allowed). | [Handover status and diagnostics](decisions.md#user-decision-handover-status-and-diagnostics-2026-10-28), [Compact readback and provenance](decisions.md#user-decision-compact-claude-parent-readback-and-provenance-2026-10-28), [Claude size-based retention](decisions.md#user-decision-claude-size-based-retention-2026-10-28), [README Storage](../README.md#storage) |
 | 12 | Separate parent decision context from successor working context. Reader access policy is explicit, not inferred from workflow prose. Plugin-recorded provenance overrides conflicting handover prose; the shared template does not ask children to restate their own agent/model/chain. | Full readback remains the default. Any live caller with tool access may read any stored handover by session id; no caller authorization. Shared template change fixture-covered. | Compact parent default: headers, pending decisions, next-steps excerpt, pointer. Explicit `full:true` or recorded successor receives verbatim original/handover; pointer always requests full for spawn races. Unknown extraction points to full, not invented content. Same open-reader policy by child id. Root intro makes provenance precedence explicit. Fixture-covered; new compact behavior live pending. | [Compact readback and provenance](decisions.md#user-decision-compact-claude-parent-readback-and-provenance-2026-10-28), [README Claude adapter](../README.md#claude-code-subagent-only-adapter) |
 
+## Pi root-session MVP
+
+Pi `0.73.1`, pinned source and observed CLI evidence:
+[Pi assessment](research/pi.md). **Fixture-covered** below never means model
+compliance; only installation/load/registration was observed in the real host.
+The root-only scope is deliberate: Pi has no core child primitive.
+
+| # | Pi status against the requirement above |
+| --- | --- |
+| 1 | `before_agent_start` custom introduction before each loop; host-persisted per user prompt, not system-prefix rewriting. Later transient notices reference it. Fixture-covered; model trust/compliance unverified. |
+| 2 | n/a deferred loader: tools register directly. Both tools and `/handover` observed in the real CLI. Allowlists may still disable them. |
+| 3 | Intro/notices define the current step (not entire task), replace that session's final report and permit plugin-storage writes in read-only work. Fixture-covered guidance only. |
+| 4 | Shared fixed stages soft, soft x 1.1, soft x 1.2. Host estimator and known window, capped integer/default soft and explicit percentages. Unknown usage fails open. Fixture-covered; hard gate absent. |
+| 5 | Partial: user must submit `/handover`; thereafter seeding and continuation prompt are automatic. No event/tool-driven replacement; no parent preauthorization claimed. |
+| 6 | n/a child replacement/type/count rules. Host owns new-root model resolution; adapter does not select a model or promise override preservation. |
+| 7 | n/a native child handback. Root tool stores text and advises ending the turn. Stop/final-message compliance unverified, not intercepted. |
+| 8 | n/a child delivery fallback. Root has no lock/never-resume enforcement. Stored handover can be read on the source branch; partial replacement failure recovery is manual. |
+| 9 | Root full seed once plus source id/file backlink and host `parentSession`; no reference reader across sessions, original-task capture or child lineage. Shared no-repeat/title-based framing fixture-covered. |
+| 10 | Seed >50% of soft warns only; no fixed chain cap or growth classification. Model text stays verbatim. Original-task-once child rule n/a. |
+| 11 | Session custom entries in Pi-owned JSONL; active-branch latest lookup; no quota/eviction policy. Ephemeral sessions memory-only; host writes nontransactional. Diagnostics from latest request hook, unknown after reload; fixture-covered. |
+| 12 | n/a parent/successor split. Current-branch-only reader takes no target arguments. Source session/effective model are recorded by the host-facing tool, not authored provenance; no model-override claim. Successor receives full seed. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
 - Claude Code intentionally differs: roots are context-only (no measurement, nudging, handover action, gating or rollover); native compaction is unchanged.
-- Future adapter Pi is explicitly unassessed; no speculative capabilities are claimed for it.
-  Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
+- Pi intentionally differs: root-oriented advisory workflow and manual command
+  rollover; no core subagent integration or automatic event-driven replacement.
+- Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
 - A supplied five-generation Claude report observed completed continuation, four parent reads/successor replacements, preserved notes and successful handbacks. That is reported evidence for the previous full-default workflow, not direct verification of this compact-readback change or every pending row.

@@ -2,6 +2,9 @@
 
 Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 
+Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
+manual command rollover) and a [Claude child adapter](#claude-code-subagent-only-adapter).
+
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
 The plugin only measures, warns, hard-gates, and rotates.
@@ -148,6 +151,59 @@ calls before completion.
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
   only warns.
+
+## Pi (root-session adapter)
+
+Pi package `@mariozechner/pi-coding-agent@0.73.1` loads `pi/index.ts` directly,
+using the root `package.json` `pi.extensions` manifest. No build or OpenCode
+process is needed. From this repository, run `npm install`, then:
+
+```sh
+pi install /absolute/path/to/auto-context-handover
+pi --handover-soft 150000
+```
+
+For a single launch without package installation:
+
+```sh
+pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
+```
+
+- Root-oriented only: no integration with third-party Pi subagent extensions.
+  Pi has no core subagent primitive. Tools register directly, with no loader.
+- A `before_agent_start` introduction explains the installed workflow before
+  each loop. Pi persists this custom message per user prompt; it is not a
+  system-prefix rewrite or a system-priority guarantee. Every provider-request
+  `context` hook appends a transient stage notice at the end when over soft.
+- `--handover-soft` accepts positive integer tokens or percentage strings.
+  Default `150000`; integers cap at 70% of the host context window, percentages
+  are uncapped. Fixed stages: soft, soft x 1.1, soft x 1.2. Unknown tokens
+  suppress notices; unknown windows permit integers but not percentages.
+  Invalid values report a session-start error and disable advisories, rather
+  than silently substituting a threshold. Measurement uses Pi's own estimator.
+- The active model calls `context_handover({handover, summary})` after a notice
+  or an explicit user request, not ordinary task completion. Both strings are
+  stored verbatim as a session custom entry. `read_handover({})` returns the
+  latest active-branch handover plus diagnostics and host source-session/model
+  metadata; it cannot read arbitrary files or other sessions. Reload and native
+  compaction do not delete these entries. Ephemeral sessions store only in memory.
+- **Rollover needs a user command:** after storage, submit `/handover` with no
+  arguments. It waits for idle, creates a fresh session with a source backlink,
+  seeds the full handover once and automatically sends a next-step continuation
+  prompt using the replacement context. The command does not ask for review.
+  Without stored text it reports an error and makes no model call. Cancellation
+  preserves the source; partial replacement failures require inspecting the
+  current session and recovering from the source's stored handover.
+- No automatic tool/event-driven rollover, lock, hard gate, original-task
+  capture, child lineage or loop guard. No model selection is forced; Pi owns
+  replacement model resolution. Native compaction stays enabled and unchanged.
+  A seed estimate above 50% of soft warns only. Pi owns file retention; there
+  is no adapter quota/eviction policy, and writes are not crash-atomic.
+- Real Pi installation/load/registration is non-model-verified; 28 fake-API
+  tests cover behavior. Model compliance and end-to-end rollover are unverified.
+
+Pinned contracts, command-dispatch caveat, checklist and reproducible non-model
+checks: [Pi assessment](docs/research/pi.md).
 
 ## Claude Code (subagent-only adapter)
 

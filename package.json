@@ -10,24 +10,32 @@
     "index.ts",
     "tui.ts",
     "source",
+    "pi",
     "README.md"
   ],
+  "pi": {
+    "extensions": [
+      "./pi/index.ts"
+    ]
+  },
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p pi/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"pi/**/*.test.ts\""
   },
   "dependencies": {
     "@opencode/ai": "2.1.4",
     "@opencode/schema": "2.1.4",
-    "effect": "4.0.1"
+    "effect": "4.0.1",
+    "typebox": "1.4.3"
   },
   "peerDependencies": {
     "@opencode/plugin": "2.1.4"
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
     "@opencode/plugin": "2.1.4",
     "@types/node": "22.10.2",
     "typescript": "5.7.3"

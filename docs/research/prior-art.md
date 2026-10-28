@@ -2,6 +2,13 @@
 
 Findings as of 2026-10-27. Scope: automatic measured soft limit plus ACTIVE-agent written handover as an alternative to compaction, for one repo with a harness-neutral core plus thin adapters, OpenCode V2 first.
 
+Pi refresh (2026-10-28): [pinned assessment and implemented root MVP](pi.md).
+The installed/verified package is `@mariozechner/pi-coding-agent@0.73.1`,
+pi-mono `781152fc24841dc54b22284514604048ebe5e2c9`; earlier `1.4.0`/`6c384aa`
+Pi rows below are historical, not the adapter's version evidence. Rollover
+requires a real slash command; the documented tool-to-command shortcut does
+not dispatch commands in this pinned release.
+
 ## 1. Summary: takeaways and adapter priority
 
 The closest full loop is claude-auto-handoff ([repo](https://github.com/alexknowshtml/claude-auto-handoff)): measured threshold, warn, hard tool gate where a refused call always ends in a handover, 40k seeded headroom floor, max-2 unattended handoffs, brief plus chain-linked viewer pages. Its authorship differs from the target: a Haiku sub-model writes the brief, not the active agent. No surveyed project covers the exact combined target (measured soft threshold + warn + hard tools-off turn + active-agent structured handover + lock/new/return policy with old ID + transcript pointer). Partial active-agent precedents: oc-ctx-handover (active agent writes HANDOVER.md, in-place reset via compaction, [repo](https://git.sync.wtf/troed/oc-ctx-handover)); opencode-handoff (model drafts continuation prompt in the active session, editable review, new session, [repo](https://github.com/joshuadavidthomas/opencode-handoff)); token-norm (pause-time skeleton note the agent completes, [repo](https://github.com/salitaba/token-norm)).
