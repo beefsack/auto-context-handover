@@ -77,6 +77,29 @@ parent continuation remain unverified. Roots are context/read-only.
 | 11 | Private PLUGIN_DATA files, atomic immutable handover+closure, consumed capabilities removed. No quota/eviction/TTL; abandoned pending/temp files can remain. Latest-response diagnostics; unavailable fields unknown. |
 | 12 | Compact parent default, `full:true` successor payload once with host provenance and diagnostics. Pending decisions unknown, unsupported next-step extraction points to full. Any live host-bound caller can read any stored child id; closed callers denied. Single-use hook capability supplies caller binding, not model ids. |
 
+## Crush root-session MVP
+
+Release `v0.98.2` and nightly `3538c72`, sources and isolated CLI evidence:
+[Crush assessment](research/crush.md). Implementation pins release `v0.98.2`,
+not the nightly lifecycle. Explicit setup authorizes a Unix-socket local-server
+integration. Native children bypass hooks. Fixtures and non-model observations
+below never establish model compliance or successful continuation.
+
+| # | Crush status against the requirement above |
+| --- | --- |
+| 1 | Static crush/CONTEXT.md loaded through context-path at agent build; stage notices reference it. Config parsing observed; standing placement source-established, reload cadence/compliance unverified. No dynamic start hook or per-request injection. |
+| 2 | Full mcp_auto_context_handover tool names in intro/notices. No deferred loader established; real SDK stdio tool listing observed. In-session exposure/allowlists unverified. |
+| 3 | Intro/notices define current step, final-report replacement and read-only plugin-storage permission; setup explicitly authorizes local-server continuation. Fixture-covered guidance, not proof of precedence/compliance. |
+| 4 | Fixed shared stages soft, soft x 1.1, soft x 1.2. API reads latest saved prompt + completion, normally one response late at tools, possibly older nonzero values. Window from workspace agent. Capped integers/explicit percentages; unknowns fail open. No hard token gate. Fixture-covered; real usage accuracy unverified. |
+| 5 | Opt-in setup enables root creation and one seeded background prompt automatically after model-authored storage, no confirmation. Create/read observed without model; admission wire fixture-covered, real continuation unverified. TUI stays source. No child workflow. |
+| 6 | n/a child replacement/count rules. Successor is a root in the same workspace. Workspace owns model resolution; no model/variant/override preservation promise or self-authored provenance. |
+| 7 | n/a child handback: child tools bypass hooks. Root final receipt/stop is advisory; HTTP 202 means detached admission, not successful model execution. Native child final-text delivery source-established only. |
+| 8 | Stored closure denies/halt supported top-level tools, including both MCP tools. No universal stop or child control; ordinary storage-error checks fail open. Uncertain create/admission requires inspection/manual recovery, never blind retry. Fixture-covered. |
+| 9 | Root full verbatim seed once with source backlink and shared no-repeat/predecessor-trust/title framing. No original task capture, child reference seeding or lineage. Fixture-covered. |
+| 10 | Actual full seed chars/4 estimate warns above 50% of known soft, compression advice only. No fixed cap/loop guard. Model text remains verbatim. Fixture-covered; host overhead excluded. |
+| 11 | Private files 0700/0600; immutable first-writer handover/summary/closure, separate recovery status. No quota/TTL/eviction; pending/temp files may remain. Diagnostics preserve known estimate/current stage/soft, but reason is always unknown: no notice-delivery provenance is persisted between hook processes. Missing fields unknown; no estimated-usage provenance from API. Fixture-covered. |
+| 12 | Full readback by sessionID, no compact mode. Any live host-bound root may read any retained id; closed callers denied. Single-use immutable-original-args capability, workspace/session correlation and explicit socket, not model ids or an OS-user sandbox. Fixture-covered; manually invoked hook/read checked separately from actual host firing. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -86,6 +109,8 @@ parent continuation remain unverified. Roots are context/read-only.
 - Codex intentionally differs: source-pinned observer plus tool-boundary notices,
   hook-bound MCP calls and file storage; no original-task capture, child lineage,
   requested-override observation or automatic parent spawning.
+- Crush intentionally differs: release PreToolUse-only root integration via an
+  explicit Unix socket; lagged saved counters, no child hooks, no TUI following.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

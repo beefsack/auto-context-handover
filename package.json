@@ -11,6 +11,7 @@
     "tui.ts",
     "source",
     "codex",
+    "crush",
     "pi",
     "plugin.json",
     "mcp.json",
@@ -26,8 +27,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p pi/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"pi/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

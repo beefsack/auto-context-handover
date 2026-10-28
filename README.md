@@ -4,7 +4,8 @@ Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 
 Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
 manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
-and a [Claude child adapter](#claude-code-subagent-only-adapter).
+and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
+[Crush root adapter](#crush-root-session-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -449,6 +450,86 @@ Adapter developers: [docs/adapters.md](docs/adapters.md) lists the harness-indep
 requirements checklist with per-adapter status and evidence. Antigravity CLI
 feasibility is assessed docs-only (blocked, no implementation) in
 [docs/research/antigravity-cli.md](docs/research/antigravity-cli.md).
+
+## Crush (root-session adapter)
+
+Targets **Crush v0.98.2 only**. Run `npm install` here first; Node >=22.18,
+no build. This is an explicit opt-in local-server integration, not a plugin
+bundle: it can create a root and submit one continuation prompt on your behalf.
+Use an absolute private Unix socket path for the server you intend to control;
+the adapter never discovers a socket or opens TCP connections.
+
+Set these variables before starting both the server and client:
+
+```sh
+export AUTO_CONTEXT_HANDOVER_ROOT="/absolute/path/to/auto-context-handover"
+export AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET="/absolute/private/run/crush.sock"
+export AUTO_CONTEXT_HANDOVER_DATA="/absolute/private/auto-context-handover-data"
+export AUTO_CONTEXT_HANDOVER_SOFT=150000
+```
+
+Create the socket's parent directory privately before starting the server.
+Use a dedicated adapter data directory, not a project or harness config directory.
+
+Add to the project's `crushrc` (paths with spaces are supported):
+
+```sh
+option context-path "$AUTO_CONTEXT_HANDOVER_ROOT/crush/CONTEXT.md"
+hook add PreToolUse --name auto-context-handover --timeout 30 \
+  --command 'node "$AUTO_CONTEXT_HANDOVER_ROOT/crush/hook.ts"'
+mcp add auto_context_handover --type stdio --command node \
+  --args "$AUTO_CONTEXT_HANDOVER_ROOT/crush/server.ts" --timeout 60
+```
+
+Start a private server, then connect from a second terminal in the project with
+the same environment (Crush owns normal model/provider setup):
+
+```sh
+crush server --host "unix://$AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET"
+# In the second terminal:
+crush --host "unix://$AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET"
+```
+
+- Root tools: `mcp_auto_context_handover_context_handover({handover,summary})`
+  and `mcp_auto_context_handover_read_handover({"sessionID":"SOURCE_ID"})`.
+  Static context introduces the workflow; stable staged PreToolUse notices
+  reference it. Native children bypass hooks and are unsupported.
+- Measurement reads last-saved prompt + completion counters and workspace model
+  window through the server, not session totals. Counters normally lag one
+  response at tool boundaries and may retain older nonzero values. Estimated
+  versus provider-measured usage provenance is unavailable through this API.
+  No per-request injection or trailing-result estimate is claimed.
+- Soft accepts positive integer tokens (default `150000`, capped at 70% of a
+  known window) or explicit percentages (uncapped). Unknown usage suppresses
+  notices; unknown windows leave integers uncapped and percentages unresolved.
+  Invalid configuration errors instead of silently selecting a default.
+- The active model supplies verbatim text. Storage and source closure precede
+  root creation; successor id is persisted before one seed submission. The
+  successor runs in the same workspace in the background. **The TUI stays on
+  the source.** No model/variant preservation guarantee, child integration,
+  hard token gate, original-task capture, loop guard or compaction changes.
+- Any live hook-bound root can read any retained handover by id, including full
+  diagnostics and recovery state; closed roots cannot use tools. Binding uses
+  immutable original arguments and a single-use capability, not model-supplied
+  identity. Same-user socket/filesystem trust is not a sandbox.
+- Diagnostics preserve known estimate/stage/soft; reason remains `unknown`
+  because notice provenance is not persisted between hook processes. Unknown
+  soft disables notices/seed warnings, not explicit handover or readback.
+- Private files use 0700 directories/0600 files; no quota, TTL or automatic
+  eviction. Abandoned capabilities/temp files may remain. Deleting adapter data
+  deletes history and closure. Publication is not an fsync durability guarantee.
+  Ordinary-tool lock checks fail open on storage errors; MCP mutations are strict.
+- Failed/uncertain creation or admission leaves the source closed with retained
+  text. Inspect the successor/server before manual recovery; never blindly
+  resubmit after a timeout. A crash between creation and link persistence can
+  orphan an unrecorded successor. Admission is not proof of a successful model run.
+  A seed estimate above 50% of soft warns only and never rewrites stored text.
+- Release server reads/root creation, configuration loading and standalone MCP
+  stdio listing are non-model checked. Fixtures are not real hook firing, model compliance,
+  successful continuation or TUI navigation evidence; those remain unverified.
+
+Pinned release/nightly capability table and reproducible non-model checks:
+[Crush assessment](docs/research/crush.md).
 
 ## Storage
 

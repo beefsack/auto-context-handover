@@ -9,6 +9,14 @@ Pi rows below are historical, not the adapter's version evidence. Rollover
 requires a real slash command; the documented tool-to-command shortcut does
 not dispatch commands in this pinned release.
 
+Crush refresh (2026-10-28): [release/nightly assessment](crush.md).
+Released `v0.98.2` has PreToolUse only; the lifecycle rows below describe a
+nightly, not release behavior. Refreshed nightly `3538c72` still structurally
+excludes child hooks. The release-pinned root MVP reads lagged saved counters
+through the explicit local Unix-socket API and creates/seeds a background root.
+The TUI does not follow; real hook firing and continuation remain unverified.
+This refresh supersedes the historical watch-item rotation claim below.
+
 ## 1. Summary: takeaways and adapter priority
 
 The closest full loop is claude-auto-handoff ([repo](https://github.com/alexknowshtml/claude-auto-handoff)): measured threshold, warn, hard tool gate where a refused call always ends in a handover, 40k seeded headroom floor, max-2 unattended handoffs, brief plus chain-linked viewer pages. Its authorship differs from the target: a Haiku sub-model writes the brief, not the active agent. No surveyed project covers the exact combined target (measured soft threshold + warn + hard tools-off turn + active-agent structured handover + lock/new/return policy with old ID + transcript pointer). Partial active-agent precedents: oc-ctx-handover (active agent writes HANDOVER.md, in-place reset via compaction, [repo](https://git.sync.wtf/troed/oc-ctx-handover)); opencode-handoff (model drafts continuation prompt in the active session, editable review, new session, [repo](https://github.com/joshuadavidthomas/opencode-handoff)); token-norm (pause-time skeleton note the agent completes, [repo](https://github.com/salitaba/token-norm)).
