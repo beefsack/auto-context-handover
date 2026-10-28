@@ -122,6 +122,28 @@ fixtures do not establish actual callback routing, model compliance or receipt.
 | 11 | Directories 0700/files 0600, immutable handover/closure via atomic exclusive publish; no quota/TTL/eviction or same-user sandbox. In-memory latest-window diagnostics unknown after reload. Both direct tools read closure strictly; ordinary hooks (including pre-tool denial) fail open on corrupt/unreadable closure. Adapter-owned failure handling, not a guarantee about uncaught SDK errors. |
 | 12 | Full readback only, no compact parent mode. Any live caller with tool access may read any retained child id; closed attributed callers denied. Host-bound provenance wins over authored identity; absent invocation attribution refuses handover. |
 
+## AiderDesk root Agent-task MVP
+
+Pinned `0.90.0-dev` / extension types `0.39.0`:
+[capabilities, citations and non-model evidence](research/aiderdesk.md).
+Real pinned loader registration is observed without Electron or a model;
+**fixture-covered** never means actual model compliance or continuation.
+
+| # | AiderDesk status against the requirement above |
+| --- | --- |
+| 1 | Per-run `onAgentStarted.contextMessages` introduction; transient step-end notices reference it. No system-prefix rewrite or priority claim. Fixture-covered; trust unverified. |
+| 2 | Direct custom tools, short names `context-handover`/`read-handover`; full approval ids `aiderdesk---*`. Real loader schemas observed; host policy can disable tools. |
+| 3 | Current-step boundary, final-report replacement and dedicated plugin-storage permission under read-only tasks in intro/notices. Advisory, fixture-covered. |
+| 4 | Host whole-prompt heuristic (system/tools/saved messages), matched model input window; fixed shared stages, capped integers/uncapped percentages. Unknowns silent. No hard gate. |
+| 5 | Absent: advisory/storage-only. User creates/opens a fresh task normally and supplies the reader reference; automatic rollover removed because public fresh-task initialization is unestablished. No child preauthorization. |
+| 6 | n/a child replacement. Adapter does not create tasks, select models or promise setting/override preservation. |
+| 7 | n/a child handback; children excluded despite native result-transform hooks. Root final stop is advisory, not intercepted. |
+| 8 | No source lock or never-resume enforcement. Stored text remains readable after reload; manual continuation only, source must remain loaded/available. |
+| 9 | Copyable source task-id reader reference with shared no-repeat, predecessor-evidence and title-based framing; reader returns full text once. No automatic seeding, original-task capture, context-file transfer or child lineage. |
+| 10 | Stored model text stays verbatim. No seed-size warning, rewriting, fixed cap, growth classification or loop guard. |
+| 11 | Working-directory plugin files scoped by sha256(taskId), new directories/files 0700/0600; immutable first-writer handover/summary. No quota/TTL/eviction or task-deletion cleanup; manual retention, worktree removal/movement can lose readback. Latest hook diagnostics; unknown after reload. Shared-directory isolation fixture-covered. |
+| 12 | Full readback only; any equipped root may read any loaded task in the current project through host lookup. No arbitrary-path or parent-only authorization. Host-recorded task/effective model, no authored provenance/override inference. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -137,6 +159,9 @@ fixtures do not establish actual callback routing, model compliance or receipt.
   current-window events rather than command-hook usage, native stop rewrite and
   direct host-attributed tools. General-purpose lifecycle and unattributed
   runtimes are unsupported; roots do not rotate.
+- AiderDesk intentionally differs: root Agent-mode heuristic measurement and
+  advisory/storage-only manual continuation, no source lock/UI following; native
+  subagents and built-in handoff/compaction are not repurposed.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

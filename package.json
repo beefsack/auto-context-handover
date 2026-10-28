@@ -10,6 +10,7 @@
     "index.ts",
     "tui.ts",
     "source",
+    "aiderdesk",
     "codex",
     "copilot",
     "crush",
@@ -28,8 +29,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json && tsc --noEmit -p aiderdesk/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\" \"aiderdesk/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -42,10 +43,12 @@
     "@opencode/plugin": "2.1.4"
   },
   "devDependencies": {
+    "@aiderdesk/extensions": "0.39.0",
     "@github/copilot-sdk": "1.0.28",
     "@mariozechner/pi-coding-agent": "0.73.1",
     "@opencode/plugin": "2.1.4",
     "@types/node": "22.10.2",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "zod": "4.6.7"
   }
 }

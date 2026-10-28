@@ -5,7 +5,8 @@ Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
 manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
 and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
-[Crush root adapter](#crush-root-session-adapter).
+[Crush root adapter](#crush-root-session-adapter) and an
+[AiderDesk root adapter](#aiderdesk-root-agent-task-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -580,6 +581,74 @@ crush --host "unix://$AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET"
 
 Pinned release/nightly capability table and reproducible non-model checks:
 [Crush assessment](docs/research/crush.md).
+
+## AiderDesk (root Agent-task adapter)
+
+**Advisory/storage only; continuation is manual.** Automatic rollover is
+disabled because fresh-task initialization is not established through the
+pinned public extension API. No end-to-end model run has been verified.
+
+Targets AiderDesk `0.90.0-dev`, source `831d10d`, with shipped extension types
+`@aiderdesk/extensions@0.39.0`. No build or OpenCode host. Run `npm install`
+in this repository, keep it in place, and create a **real** project extension
+directory with this `index.ts` (replace the absolute path):
+
+```text
+<project>/.aider-desk/extensions/aiderdesk/index.ts
+```
+
+```ts
+export { default } from "/absolute/path/to/auto-context-handover/aiderdesk/index.ts";
+```
+
+The same real `aiderdesk/` folder can go under `~/.aider-desk/extensions/`
+for global installation; use one scope, not both. Do not symlink the folder:
+the pinned host skips directory symlinks. Do not copy `aiderdesk/` alone:
+its shared imports require the repository. Restart AiderDesk after repository
+updates; its extension watcher need not observe files outside the entry folder.
+
+- Root **Agent mode only**; native subagents, compaction modes and Aider modes
+  are excluded. Model-visible tools are `context-handover({handover,summary})`
+  and `read-handover({taskId?})`; approval identifiers are
+  `aiderdesk---context-handover` and `aiderdesk---read-handover`.
+  Normal host approval/disabled-tool policies still apply.
+- A per-run context introduction explains the installed workflow. Transient
+  per-step notices use the host's whole-prompt token estimator, not billing
+  totals or exact provider usage. It estimates system text, tool definitions
+  and saved task messages; later extension changes may not be counted.
+- `AUTO_CONTEXT_HANDOVER_SOFT`, set before launching AiderDesk, accepts positive
+  integer tokens or explicit percentages. Default `150000`; integers cap at
+  70% of a known model input window, percentages are uncapped. Fixed shared
+  stages: soft, soft x 1.1, soft x 1.2. Zero/error estimates suppress notices;
+  unknown windows leave integers uncapped and percentages unresolved. Invalid
+  or empty explicit configuration logs an error and disables notices.
+- The active model writes the full handover through the tool, then ends its
+  turn. Create/open a fresh Agent-mode task through the normal AiderDesk UI in
+  the same project, then use the reader-reference prompt returned by the tool:
+  call `read-handover` with the source `taskId` and continue from
+  "Prioritized next steps". Keep the source task loaded and its working
+  directory available. The adapter never creates or prompts another task,
+  selects a model, transfers context files or records successor lineage.
+- Dedicated `<working-directory>/.auto-context-handover/<sha256(taskId)>/handover.json`
+  retains immutable verbatim handover/summary, first writer wins. The host's
+  `getTaskDir()` is a shared project/worktree directory, not task-private
+  storage; hashed task scopes prevent collisions. New directories/files use
+  0700/0600, not a same-user sandbox. No quota, TTL, automatic eviction or
+  task-deletion cleanup; retained files need manual removal. Removing/changing
+  a worktree can make its handovers unavailable. Atomic publication is not
+  fsync durability; interrupted writes may leave temporary files.
+- Readback includes recorded diagnostics and full text once. Any root with
+  these tools can read any loaded task in the current project through host
+  lookup, never arbitrary paths; no parent-only authorization is claimed.
+  Reload loses transient measurements, not stored text.
+- No source lock, hard gate, child workflow or loop guard. Source reuse is not
+  prevented. Native handoff/compaction remain unchanged and can still run;
+  native handoff's separate generation call is not used to author this handover.
+  No seed-size warning or automated continuation. Host-loader registration and
+  27 fake-API tests are non-model-verified; manual continuation, approvals and
+  model compliance remain unverified.
+
+[Pinned capabilities and reproducible non-model checks](docs/research/aiderdesk.md).
 
 ## Storage
 

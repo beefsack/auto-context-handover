@@ -1,0 +1,15 @@
+{
+  "name": "auto-context-handover-aiderdesk",
+  "version": "0.1.0",
+  "description": "Measured soft-limit handover adapter for AiderDesk root agent tasks",
+  "main": "index.ts",
+  "keywords": [
+    "aiderdesk",
+    "extension",
+    "context",
+    "handover"
+  ],
+  "author": "auto-context-handover",
+  "license": "MIT",
+  "type": "module"
+}

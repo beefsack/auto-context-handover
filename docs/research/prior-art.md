@@ -2,6 +2,14 @@
 
 Findings as of 2026-10-27. Scope: automatic measured soft limit plus ACTIVE-agent written handover as an alternative to compaction, for one repo with a harness-neutral core plus thin adapters, OpenCode V2 first.
 
+AiderDesk refresh (2026-10-29): [pinned assessment and root adapter](aiderdesk.md)
+supersedes its historical capability rows below. Per-step host estimation,
+direct tools and task-id-scoped storage are fixture-covered; real pinned loader
+registration is observed without a model. Continuation is manual: public
+fresh-task initialization is unestablished, so automatic rollover is absent.
+`getTaskDir()` is the shared working directory, not task-private storage.
+Native subagents remain excluded.
+
 Copilot CLI refresh (2026-10-29): [1.0.105 child-first adapter](copilot-cli.md)
 supersedes its historical rows below. Experimental plugin-shipped extensions
 bridge host SDK usage events, tools and hooks. Shipped declarations establish
