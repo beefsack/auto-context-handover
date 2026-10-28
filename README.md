@@ -326,7 +326,9 @@ plugin/marketplace source; no OpenCode host is involved.
   contracts, not full API verification, and carries no live version claim.
 
 Adapter developers: [docs/adapters.md](docs/adapters.md) lists the harness-independent
-requirements checklist with per-adapter status and evidence.
+requirements checklist with per-adapter status and evidence. Antigravity CLI
+feasibility is assessed docs-only (blocked, no implementation) in
+[docs/research/antigravity-cli.md](docs/research/antigravity-cli.md).
 
 ## Storage
 

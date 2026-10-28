@@ -37,6 +37,8 @@ Lost transient diagnostics remain `unknown`; durable closure locks survive.
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
 - Claude Code intentionally differs: roots are context-only (no measurement, nudging, handover action, gating or rollover); native compaction is unchanged.
-- Future adapters (Gemini CLI, Pi) are explicitly unassessed; no speculative capabilities are claimed for them.
+- Future adapter Pi is explicitly unassessed; no speculative capabilities are claimed for it.
+  Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
+  Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
 - A supplied five-generation Claude report observed completed continuation, four parent reads/successor replacements, preserved notes and successful handbacks. That is reported evidence for the previous full-default workflow, not direct verification of this compact-readback change or every pending row.
