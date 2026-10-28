@@ -232,6 +232,27 @@ observed without a model; extension dispatch is source-established only.
 | 11 | HOME private hashed-id files, immutable atomic first-writer publication, new dirs/files 0700/0600. No quota/TTL/eviction/deletion cleanup/fsync promise; temps may remain. Latest estimate/stage/soft/notice-append reason; lost diagnostics unknown. |
 | 12 | Full readback only; any equipped caller (including children) may read any retained id. Writer uses host context plus fresh matching parentless session lookup, not authored identity. Model/override/chain unknown; no arbitrary-path or parent-only reader policy, not a same-user sandbox. |
 
+## Qwen Code subagent-first MVP
+
+Pinned `@qwen-code/qwen-code@0.26.3`: [capabilities and primary sources](research/qwen-code.md).
+Extension linking and real host MCP connection were observed without a model.
+**Fixture-covered** never establishes child hook routing, model compliance or receipt.
+
+| # | Qwen status against the requirement above |
+| --- | --- |
+| 1 | SessionStart/SubagentStart additionalContext introductions; PostToolUse notices reference installation. Fixture-covered; priority/trust/compliance unverified. |
+| 2 | Full mcp__auto_context_handover tool names; no deferred loader established. Real stdio tools/list observed; host policy can hide tools. |
+| 3 | Intro defines current-step/final-report precedence and plugin-storage writes under read-only instructions. Advisory, fixture-covered. |
+| 4 | Latest identity-matched child ROUND_TEXT prompt+candidates usage, synchronously recorded before tools; no cache/billing accumulation or trailing-result estimate. Fixed shared stages, integer-only default150000 uncapped/unknown child window. Unknowns silent; invalid config disables notices, no hard token gate. |
+| 5 | Root intro attributes read-then-replace without confirmation to installation default. Advisory; no automatic spawn or observed parent compliance. |
+| 6 | Same logical child/type/requested override via parent's original spawn parameters. Type/effective model/override unknown; no count-limit or provenance guarantee. |
+| 7 | Native final-text return plus bounded SubagentStop correction after storage. Fixture-covered guidance, no deterministic rewrite/classifier handback/observed parent receipt. |
+| 8 | Read-before-message and never-resume guidance; persistent closure denies supported child tools and both bound MCP calls. No universal stop on disabled/failed hooks. |
+| 9 | Short full-reader reference, shared no-repeat/title-based/predecessor-evidence framing. No captured original, lineage or automatic successor classification. |
+| 10 | Verbatim text; >50%-of-soft successor-body chars/4 warning/compression advice only. No fixed generation cap/productivity classification; parent may check in on stalls/growth. |
+| 11 | HOME private immutable hashed-id handover+closure, unchanged Codex store; no quota/TTL/eviction/deletion cleanup/fsync guarantee. Pending/temp files may remain. Compaction byte floors, corrupt/torn reads unknown; failed floor writes log but can leave stale floors. Diagnostics reflect notice append, not receipt; invalid soft reads unknown. |
+| 12 | Compact default, full:true verbatim read; unavailable pending decisions/provenance unknown. Any live host-bound caller may read any composite session:agent id, closed callers denied. Single-use original-args capability, not authored caller identity or same-user sandbox. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -260,8 +281,11 @@ observed without a model; extension dispatch is source-established only.
   export and per-session stdio process binding; no model-visible start intro,
   ordinary tool gate, automatic continuation or source lock.
 - Kilo intentionally differs: legacy hook/SDK API, shared pure logic rather
-  than an OpenCode V2 shim; root-only anchored advisories and manual reader
-  continuation, no KV/source lock/UI following or native child workflow.
+   than an OpenCode V2 shim; root-only anchored advisories and manual reader
+   continuation, no KV/source lock/UI following or native child workflow.
+- Qwen intentionally differs: native classic command hooks, child transcript
+  response records and Codex capability/store reuse; no Gemini BeforeModel,
+  child window discovery, Stop telemetry, lineage or automatic parent spawn.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

@@ -9,8 +9,9 @@ and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
 [Cline CLI/SDK root adapter](#cline-clisdk-root-adapter), plus an
 [Amp focused-root adapter](#amp-focused-root-adapter), a
-[Goose root adapter](#goose-root-session-adapter) and a
-[Kilo root adapter](#kilo-root-session-adapter).
+[Goose root adapter](#goose-root-session-adapter), a
+[Kilo root adapter](#kilo-root-session-adapter) and a
+[Qwen child adapter](#qwen-code-subagent-first-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -500,6 +501,78 @@ that installed plugin copy as well.
 
 Primary-source capability table, requirements checklist and reproducible
 isolated commands: [Codex assessment](docs/research/codex.md).
+
+## Qwen Code (subagent-first adapter)
+
+Targets **Qwen Code 0.26.3**. Run `npm install` in this repository first;
+Node >=22.18 is required. No build or OpenCode host is involved. Link the
+bundled `qwen/` subdirectory as an extension (it imports shared files from
+the intact checkout, so link the directory, not a copy):
+
+```sh
+npm install --global @qwen-code/qwen-code@0.26.3
+qwen extensions link /absolute/path/to/auto-context-handover/qwen
+```
+
+Restart Qwen Code afterwards. The manifest (`qwen/qwen-extension.json`)
+registers the `auto_context_handover` MCP server (`node
+--experimental-strip-types ${extensionPath}/server.ts`, so the model calls
+`mcp__auto_context_handover__context_handover` /
+`mcp__auto_context_handover__read_handover`); `qwen/hooks/hooks.json`
+registers classic command hooks (`${CLAUDE_PLUGIN_ROOT}/hook.ts`), not Mods.
+Workspace trust, hook/MCP settings and tool allowlists still apply.
+
+- **Child-only measurement from the child's own transcript.** The hook
+  input's `transcript_path` is always the root transcript
+  (`<projectDir>/chats/<sessionId>.jsonl`); the child transcript is derived
+  as `<projectDir>/subagents/<sessionId>/agent-<agentId>.jsonl` (only
+  strict `[A-Za-z0-9_-]` ids; otherwise unknown). The latest assistant
+  record matching `sessionId`+`agentId` and carrying `agentRunId`+`agentRound`
+  supplies the estimate as `promptTokenCount + candidatesTokenCount` only:
+  never billing totals, cache, or thoughts. Invalid latest usage resolves to
+  unknown with no fallback to older records. The root transcript is never
+  parsed as a child. Child keys are the opaque composite
+  `sessionId:agentId`, used for storage and as the reader's `childId`.
+- Set `AUTO_CONTEXT_HANDOVER_SOFT` in the environment before launching Qwen.
+  Positive integer tokens only, default `150000`, uncapped (the child window
+  is unknown); fixed stages at soft, soft x 1.1 and soft x 1.2. An invalid
+  value disables staged notices but leaves reader/writer identity binding
+  working; readback reports unknown soft/stage/estimate, not the default.
+  Unknown usage suppresses notices. Pre/PostCompact checkpoints the child
+  file length and measures only later records; native compaction is unchanged.
+- Root SessionStart introduces the configured read-then-replace workflow;
+  roots can read but cannot store and are not measured/nudged.
+  Subagent-spawn children receive a start introduction. After a notice,
+  finish the current step and call
+  `mcp__auto_context_handover__context_handover({handover,summary})`, then
+  end the turn with exactly its receipt as the final native message. The
+  stored handover replaces that session's final report; plugin-storage writes
+  remain permitted under read-only task instructions before handover.
+- Parent readback:
+  `mcp__auto_context_handover__read_handover({"childId":"SESSION:AGENT"})`
+  returns compact diagnostics, host-observed provenance and next-step excerpt;
+  use `full:true` for the verbatim handover once. Pass the reader's short
+  successor prompt to a same-type successor, never the full handover. The
+  parent retains its original task and requested model-override parameters;
+  the adapter does not capture them or infer overrides. No original-task
+  capture, lineage, model selection, automatic successor spawn or
+  root rollover.
+- Calls are bound to host identity by a synchronous PreToolUse single-use
+  capability, not a model-supplied caller id. Both tools refuse unbound calls;
+  roots cannot store. Any live bound caller may read any stored child id; closed callers
+  cannot read or work. This is not an OS-user filesystem sandbox.
+- Verbatim text/summary and closure persist together in immutable hashed-id
+  files under `~/.qwen/auto-context-handover/`. No quota, TTL or automatic
+  eviction. Consumed capabilities are removed; abandoned pending requests and
+  crash-leftover temporary files can remain. Atomic publication is not an
+  fsync/crash-durability guarantee.
+- SubagentStop applies one bounded final-text correction only after a stored
+  handover, never a measurement denial. No Stop telemetry. Installation, MCP
+  registration and fixtures are verified without a model; hook execution,
+  model compliance and end-to-end continuation remain unverified.
+
+Source contracts, storage/measurement limitations and non-model evidence:
+[Qwen assessment](docs/research/qwen-code.md).
 
 ## Claude Code (subagent-only adapter)
 
