@@ -1,0 +1,5 @@
+{
+  "name": "auto-context-handover",
+  "version": "0.1.0",
+  "description": "Measured soft-limit context handover for Goose: notices at the soft boundary, stores the model-written handover, and reads it back in a fresh session."
+}

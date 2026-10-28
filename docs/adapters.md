@@ -189,6 +189,27 @@ parent deletion can make a former child indistinguishable from a root.
 | 11 | HOME private hashed-id files, immutable body/claim and best-effort result status; no quota/TTL/eviction/deletion cleanup/fsync promise. Latest boundary estimate/stage/notice-append reason; lost diagnostics unknown. |
 | 12 | Full readback only; any equipped caller can read any retained thread id. Host-bound source id wins over prose; effective model/override/chain unknown. No arbitrary path or parent-only reader policy. |
 
+## Goose root-session MVP
+
+Release `v1.56.0`, pinned contracts and isolated commands:
+[Goose assessment](research/goose.md). **Fixture-covered** is not model
+compliance. Real host MCP probing/hook parsing was non-model only.
+
+| # | Goose status against the requirement above |
+| --- | --- |
+| 1 | Absent trusted model-visible standing intro: SessionStart banner is user-only. Self-contained Stop-denial notices supply installation attribution; no system-prefix rewrite. |
+| 2 | Full plugin-prefixed names, direct MCP listing observed; no deferred loader established. Installed prefix source-established + drift fixture, actual model-session exposure unverified. |
+| 3 | Denial defines current step, final-report replacement and plugin-storage writes under read-only instructions. Explicit setup authorizes denials. Fixture-covered guidance only. |
+| 4 | Latest persisted exported usage.total_tokens, else input+output; no cumulative ledger/cache addition. Fixed soft/1.1/1.2 stages; integer-only default150000 uncapped, window unknown. Unknowns fail open. No hard token gate. |
+| 5 | Absent automatic continuation: user opens fresh equipped root and submits reader reference. No parent preauthorization or automatic spawn. |
+| 6 | n/a child replacement/count rules. Native children excluded from writing; no model selection/settings/override preservation claim. |
+| 7 | n/a child handback. Root tool stores model strings and requests final receipt/stop; actual final delivery/compliance unverified. |
+| 8 | No source lock or stop correction after storage. Opt-in Stop denial forces another model turn, bounded by host consecutive-block cap (default8; setup1). Storage found permits Stop. |
+| 9 | Manual reader reference, full text once and shared no-repeat/predecessor-evidence/title framing. Source id recorded; no original-task capture, automatic seed, child lineage or successor classification. |
+| 10 | Payload chars/4 >50% of recorded soft warns/compression advice only, no rewriting, fixed generation cap or growth classification. |
+| 11 | XDG-data/HOME private hashed-id files, immutable first-writer atomic link publication, new dirs/files0700/0600. No quota/TTL/eviction/deletion cleanup/fsync guarantee; temps may remain. Latest persisted estimate/stage/soft, reason always unknown. |
+| 12 | Full readback only, any host-bound caller (including children) may read any retained id. Writer pins AGENT_SESSION_ID, matches call metadata and exported root id/type/parent; no authored caller. Real Hidden probe passed binding then refused writer. Not a same-user sandbox. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -213,6 +234,9 @@ parent deletion can make a former child indistinguishable from a root.
 - Amp intentionally differs: focused-parentless active-view estimation and
   successful-turn-end automatic root attempt using the source agent; no source
   lock, universal child detection, known window or authenticated routing proof.
+- Goose intentionally differs: explicit Stop-denial opt-in, lagged native JSON
+  export and per-session stdio process binding; no model-visible start intro,
+  ordinary tool gate, automatic continuation or source lock.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).

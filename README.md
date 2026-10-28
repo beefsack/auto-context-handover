@@ -8,7 +8,8 @@ and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
 [Cline CLI/SDK root adapter](#cline-clisdk-root-adapter), plus an
-[Amp focused-root adapter](#amp-focused-root-adapter).
+[Amp focused-root adapter](#amp-focused-root-adapter) and a
+[Goose root adapter](#goose-root-session-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -156,6 +157,74 @@ calls before completion.
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
   only warns.
+
+## Goose (root-session adapter)
+
+Targets Goose **v1.56.0**. Requires Node >=22.18 and `npm install` in this
+intact checkout; no build. Install only the Goose subdirectory, not the
+repository root (its manifests serve other harnesses). For project scope:
+
+```sh
+mkdir -p .agents/plugins
+ln -s /absolute/path/to/auto-context-handover/goose .agents/plugins/auto-context-handover
+```
+
+For user scope use `~/.agents/plugins/auto-context-handover` instead; with
+`GOOSE_PATH_ROOT`, use its `.agents/plugins/` directory. Do not rename the
+plugin directory or copy `goose/` alone: shared imports resolve through the
+checkout. Goose discovers `plugin.json`, `.mcp.json` and `hooks/hooks.json`.
+Do not install the whole repository using `goose plugin install`.
+
+**Stop denials are opt-in, not passive nudges.** To enable measured notices,
+set these in the environment that launches Goose (including its CLI binary on
+PATH). The host-wide cap also affects other Stop hooks:
+
+```sh
+export AUTO_CONTEXT_HANDOVER_GOOSE_STOP=1
+export AUTO_CONTEXT_HANDOVER_SOFT=150000
+export GOOSE_STOP_HOOK_BLOCK_CAP=1
+# Optional if goose is not on PATH:
+export AUTO_CONTEXT_HANDOVER_GOOSE_BIN=/absolute/path/to/goose
+```
+
+- Root `user` sessions only. The writer binds the host's per-session MCP
+  process identity and call metadata, then verifies a matching root via native
+  JSON session export. Children/unknown attribution cannot write. Any equipped
+  host-bound caller, including children, may read any retained id.
+- `Stop` reads the last persisted provider usage, never cumulative billing.
+  Fixed stages at soft, soft x 1.1 and soft x 1.2. Integer-only soft defaults to
+  150000, uncapped (window unknown). Invalid configuration logs an error and
+  disables notices, not storage/readback. Unknown usage/export failures allow
+  stopping. Export is bounded to 15 seconds/16 MiB.
+- A denial forces another model turn; it is hidden from the user but visible
+  to the model. The host limits consecutive blocks (default 8; setup above
+  chooses 1). No PreToolUse gate or per-request injection. SessionStart's
+  banner is user-visible, **not** model-visible. Native compaction is unchanged
+  and may happen first.
+- The model calls
+  `auto-context-handover_auto-context-handover__context_handover({handover, summary})`
+  and ends its turn. Storage is immutable; no source lock, automatic successor
+  or UI following. Manually open a **fresh equipped root**, not resume/duplicate
+  history, and submit:
+
+  ```text
+  Call auto-context-handover_auto-context-handover__read_handover({"sessionID":"SOURCE_ID"}) and continue from "Prioritized next steps".
+  ```
+
+- Full text returns once with shared no-repeat/evidence framing; payload
+  chars/4 above 50% of recorded soft warns only. No original-task capture,
+  lineage or model-override preservation promise. Diagnostics reason remains
+  unknown (current stage does not prove notice delivery).
+- Private hashed-id records live under
+  `$XDG_DATA_HOME/auto-context-handover-goose`, else
+  `~/.local/share/auto-context-handover-goose`; override with absolute
+  `AUTO_CONTEXT_HANDOVER_GOOSE_DATA`. New directories/files are 0700/0600.
+  No quota/TTL/eviction/deletion cleanup; retention is manual. Atomic publication
+  is not fsync durability or a same-user sandbox; crash-leftover temps may remain.
+
+[Capabilities, citations and isolated non-model evidence](docs/research/goose.md).
+Actual Stop dispatch, model compliance and fresh-root continuation remain
+unverified; executable checks and fixtures do not establish them.
 
 ## Amp (focused-root adapter)
 

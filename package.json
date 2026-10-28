@@ -16,6 +16,7 @@
     "codex",
     "copilot",
     "crush",
+    "goose",
     "pi",
     "plugin.json",
     "mcp.json",
@@ -39,8 +40,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json && tsc --noEmit -p aiderdesk/tsconfig.json && tsc --noEmit -p cline/tsconfig.json && tsc --noEmit -p amp/tsconfig.json",
-    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\" \"aiderdesk/**/*.test.ts\" \"cline/**/*.test.ts\" \"amp/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p source/tsconfig.json && tsc --noEmit -p hooks/tsconfig.json && tsc --noEmit -p codex/tsconfig.json && tsc --noEmit -p crush/tsconfig.json && tsc --noEmit -p goose/tsconfig.json && tsc --noEmit -p pi/tsconfig.json && tsc --noEmit -p copilot/tsconfig.json && tsc --noEmit -p aiderdesk/tsconfig.json && tsc --noEmit -p cline/tsconfig.json && tsc --noEmit -p amp/tsconfig.json",
+    "test": "node --test \"source/**/*.test.ts\" \"hooks/**/*.test.ts\" \"codex/**/*.test.ts\" \"crush/**/*.test.ts\" \"goose/**/*.test.ts\" \"pi/**/*.test.ts\" \"copilot/**/*.test.ts\" \"aiderdesk/**/*.test.ts\" \"cline/**/*.test.ts\" \"amp/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

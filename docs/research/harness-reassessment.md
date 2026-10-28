@@ -8,7 +8,7 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 | --- | --- | --- | --- |
 | Cline via hook-bearing AgentExtension (`@cline/core` 0.2.0; subsequent official CLI pin `cline@3.0.74`) | [Root advisory/manual MVP shipped](cline.md) | 1 | S (at or below Pi; below Crush/Codex) |
 | Amp (`@ampcode/plugin` 0.0.0-20261028101742-g93a0da1) | [Focused-root advisory MVP shipped](amp.md) | 2 | M (above Pi, near Crush) |
-| Goose (source `block/goose@ee8500d`) | Conditional MVP only (poll + denial gate + manual continuation) | 3 | M (wiring cost, no host feature work) |
+| Goose (release `v1.56.0`) | [Root opt-in Stop-denial/manual MVP shipped](goose.md) | 3 | M (wiring cost, no host feature work) |
 | Cursor editor / CLI | Blocked for measured pre-compaction MVP; storage/manual-only integration feasible in editor, CLI trigger unverified | - | M if measurement unblocked (MCP + hooks, above Pi) |
 | Roo Code | Dead harness, not worth building | - | - |
 | Aider CLI | Blocked, no installed surface | - | - |
@@ -44,6 +44,11 @@ continuation/client following remain unverified.
 - Subagents: `createAgent` + `run()` returns `{threadID, text}` with `parentThreadID` linkage; detection by thread-id compare ([api](https://ampcode.com/docs/plugin-api)).
 
 ## Goose: conditional MVP only
+
+The following screen is historical. The [released MVP assessment](goose.md)
+resolves caller binding through per-session stdio identity plus call metadata
+and exported root classification, observes JSON export and non-model host MCP
+loading, and documents explicit Stop-denial opt-in. Manual continuation remains.
 
 - Measurement: no usage in hook input - but that is a payload gap, not a hard trigger gap, since an ordinary hook (shell with `session_id` on stdin) can shell out to a read-only lagged read: session export in JSON/YAML (markdown export renders user-visible messages only and omits usage) or the pinned `sessions` table (`usage` = latest per-request provider report, `accumulated_*` = cumulative ledger). Non-model CLI invocation of that export path is NOT observed. Source: `session_manager.rs` (`usage` vs `accumulated_usage`), `crates/goose-cli/src/commands/session.rs:293` (`handle_session_export`) ([session management](https://goose-docs.ai/docs/guides/sessions/session-management), [logs](https://goose-docs.ai/docs/guides/logs)).
 - Injection: hooks add no general `additionalContext` channel. The only model-visible paths are denial gates - opt-in intrusive, not an ordinary nudge: `PreToolUse` denial refuses the call with the hook `reason` shown to the model, and turn-end `Stop` denial forces another turn (consecutive-block cap), injecting a user-role message hidden from the user but visible to the model. Safe shape only: turn-end `Stop` denial plus cap; if `PreToolUse` denial is used, exempt the writer/reader tools. Only `PreToolUse` and `Stop` can block; `UserPromptSubmit` / `PostToolUse` blocks are ignored; `SubagentStart`/`SubagentStop` are never emitted ([hooks](https://goose-docs.ai/docs/guides/context-engineering/hooks/)).
