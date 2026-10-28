@@ -1,5 +1,10 @@
 # Decisions
 
+## Kiro CLI assessment (2026-10-29)
+
+- (tentative, pending user review) Assess AWS Kiro CLI stable `2.35.1`, build `835ff3643451d740aec69e395a7f405b5d8aee84`; native distribution succeeds without authentication. Ship no adapter yet: no established hook-readable active-context measurement or host-to-MCP caller binding. Context meters, billing totals, tool-only accumulation and full-history exports do not establish a current-window estimator. [Assessment and unblock conditions](research/kiro-cli.md).
+- (tentative, pending user review) Keep v2-default and explicit V3 contracts separate. V3 successful PostToolUse stdout is ignored; SessionStart/UserPromptSubmit injection and potentially intrusive Stop continuation are distinct channels. Do not implement a speculative tool-boundary nudge or model-echoed identity. V3 ACP exposes context-usage notifications to its owning client, but an ACP wrapper is a separate architecture choice, not a verified installed-hook integration. Native compaction remains unchanged; no storage-only substitute, adapter install instructions or runtime dependencies are added.
+
 ## Qwen Code subagent-first MVP (2026-10-29)
 
 - (tentative, pending user review) Pin `@qwen-code/qwen-code@0.26.3` / source `eeee1443a7e36ab22b2f1dcded8dec64b621a7ee`. Separate native `qwen/` extension, classic bundled command hooks and MCP, linked to the intact checkout; no build, root-manifest changes or Qwen runtime dependency. Qwen does not retain Gemini's per-model hook events. [Assessment](research/qwen-code.md).

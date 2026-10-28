@@ -253,6 +253,24 @@ Extension linking and real host MCP connection were observed without a model.
 | 11 | HOME private immutable hashed-id handover+closure, unchanged Codex store; no quota/TTL/eviction/deletion cleanup/fsync guarantee. Pending/temp files may remain. Compaction byte floors, corrupt/torn reads unknown; failed floor writes log but can leave stale floors. Diagnostics reflect notice append, not receipt; invalid soft reads unknown. |
 | 12 | Compact default, full:true verbatim read; unavailable pending decisions/provenance unknown. Any live host-bound caller may read any composite session:agent id, closed callers denied. Single-use original-args capability, not authored caller identity or same-user sandbox. |
 
+## Kiro CLI assessment (not shipped)
+
+AWS Kiro CLI stable `2.35.1`, artifact/hash and primary-source capability table:
+[Kiro assessment](research/kiro-cli.md). Non-model binary version/help succeeded;
+agent validation was authentication-blocked. No Kiro fixtures, adapter,
+hook firing, model compliance, MCP registration or continuation are claimed.
+
+| Checklist requirements | Assessment status |
+| --- | --- |
+| 1-3: introduction, tool loading, precedence | Candidate V3 SessionStart/UserPromptSubmit stdout introduction and `tool_load`/`tool_call` MCP discovery; no implementation or compliance evidence. Ordinary post-tool stdout is ignored. |
+| 4: measured staged escalation | Blocked: no established hook-readable active-context usage/transcript estimator. Interactive meter/full-history export are insufficient. ACP context-usage updates belong to the owning client, not ordinary hooks. |
+| 5-8: continuation, replacement, delivery, recovery | Fresh `/chat new` documented; subagents return findings, but attributed lifecycle/delivery and bounded Stop recovery unverified. No automatic continuation, source lock or child workflow implemented. |
+| 9-12: reference seed, growth, storage, reader policy | Absent implementation. Native session persistence is not plugin handover readback; trustworthy host-to-MCP caller binding remains unestablished. No lineage, quotas or diagnostics claimed. |
+
+The blocker is missing verified contracts, not absence of hooks or a generic
+per-model gate. V2 is the binary's default engine; V3 docs require explicit
+targeting. [Unblock conditions](research/kiro-cli.md#blockers-and-unblock-path).
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.

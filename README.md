@@ -754,6 +754,9 @@ Adapter developers: [docs/adapters.md](docs/adapters.md) lists the harness-indep
 requirements checklist with per-adapter status and evidence. Antigravity CLI
 feasibility is assessed docs-only (blocked, no implementation) in
 [docs/research/antigravity-cli.md](docs/research/antigravity-cli.md).
+AWS Kiro CLI **2.35.1** is also [assessed, not shipped](docs/research/kiro-cli.md):
+hook-readable active-context measurement and MCP caller binding remain
+unestablished. No Kiro adapter installation is available.
 
 ### GitHub Copilot CLI (subagent-first adapter)
 

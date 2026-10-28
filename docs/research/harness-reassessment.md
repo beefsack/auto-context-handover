@@ -15,7 +15,8 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 
 Kilo's fast-track assessment is complete: [root advisory/manual MVP](kilo.md).
 Qwen's follow-up is complete: [pinned subagent-first MVP](qwen-code.md).
-Next assessments (not implementation rank): OpenHands / Kiro CLI follow-ups.
+Kiro CLI follow-up: [2.35.1 assessment](kiro-cli.md), prerequisite-blocked;
+no adapter shipped. OpenHands remains a follow-up, not an implementation rank.
 
 ## Cline: feasible via hook-bearing AgentExtension
 
@@ -83,7 +84,7 @@ loading, and documents explicit Stop-denial opt-in. Manual continuation remains.
 - Kilo Code: subsequent [pinned 7.8.23 assessment and root advisory/manual MVP](kilo.md) supersede this quick screen. Current CLI-backed VS Code extension shares the documented server plugin surface. Real CLI registration observed; root OpenCode V2 entry rejected. Five-field ordinary-assistant normalization is source-established; summary-worker/pre-summary anchors excluded. No shim, child automation or verified model continuation.
 - Qwen Code: [0.26.3 subagent-first MVP](qwen-code.md) supersedes this quick screen. Child-attributed per-response transcript usage and native classic hooks/MCP support measured advisories; Gemini per-model hooks are absent. Installation/MCP connection observed without a model, actual child routing/compliance/receipt unverified.
 - OpenHands: follow-up only. `PreToolUse` deny, `Stop` block (lint/test gate), `UserPromptSubmit` `additionalContext`, plus SDK plugin packaging ([hooks](https://docs.openhands.dev/openhands/usage/customization/hooks), [SDK plugins](https://docs.openhands.dev/sdk/guides/plugins)). Trigger source (no usage in hook payload found) and hook-initiated rotation are unverified; quick screen only.
-- Kiro CLI: follow-up (promising, payload-schema read required). The prior IDE-only "no hooks" reading is invalid for the CLI: primary docs list CLI lifecycle triggers (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, plus `agentSpawn` as a 2.x/V3 alias) with a per-trigger block table (`PreToolUse` can block; `Stop` can request another turn; `UserPromptSubmit` cannot block in CLI V3) ([trigger types](https://kiro.dev/docs/hooks/types/), [CLI hooks migration](https://kiro.dev/docs/cli/v3/hooks-migration/)). Page bodies are thin/secondary-corroborated, so hook payload schema (usage? caller identity?) and programmatic continuation stay UNVERIFIED: promising, not blocked-due-to-no-model-gate, and not proven feasible.
+- Kiro CLI: [pinned 2.35.1 assessment](kiro-cli.md) supersedes this screen. Hooks exist, but ordinary-hook active-context measurement and host-to-MCP caller binding remain unestablished. V2 is the binary default; V3 successful post-tool stdout is ignored. ACP documents context-usage updates for an owning client, not a hook getter. Prerequisite-blocked, no adapter shipped; exact unblock conditions are in the assessment.
 - Zed / Warp: deferred. Zed has no tool-use hooks/events for the built-in agent (extensions host external agents via ACP, not injection into Zed's own agent); Warp agent hooks are open feature requests and its agent story hosts third-party CLIs that own their own hooks ([Zed #52688](https://github.com/zed-industries/zed/issues/52688), [Warp #7834](https://github.com/warpdotdev/warp/issues/7834)).
 
 ## Pinned sources
