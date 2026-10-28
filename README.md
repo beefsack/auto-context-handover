@@ -6,7 +6,8 @@ Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
 manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
 and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
-[AiderDesk root adapter](#aiderdesk-root-agent-task-adapter).
+[AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
+[Cline CLI/SDK root adapter](#cline-clisdk-root-adapter).
 
 The session's own model writes the handover; a linked fresh session continues it automatically, or lock mode stops without a successor. Subagents return only a summary to the parent.
 
@@ -154,6 +155,51 @@ calls before completion.
   beyond their seed lock instead of rotating. Productive handovers
   reset the streak; the first root handover never counts. Seed >50% of soft
   only warns.
+
+## Cline CLI/SDK (root adapter)
+
+Targets official `cline@3.0.74` and `@cline/sdk@0.2.0`, not legacy `clite`.
+Install this repository as a package, not just `cline/index.ts` (which imports
+shared files). Node >=22.18; no build step. From this repository run `npm install`,
+then:
+
+```sh
+npm install -g cline@3.0.74
+cline plugin install /absolute/path/to/auto-context-handover --cwd /absolute/path/to/project
+```
+
+This installs a copy: reinstall after code changes; start a new session to load
+it. Omit `--cwd` for global installation. For an existing SDK application, add
+the absolute `cline/index.ts` path to `config.pluginPaths` on `cline.start`,
+keeping its existing model/runtime configuration. Direct `extensions` users
+must call `createClineHandoverPlugin()` once per session, never reuse an instance.
+
+- **Root-only, advisory/manual.** `beforeRun` introduces the workflow;
+  `beforeModel` appends transient staged notices without rewriting the system
+  prefix. The complete exposed request's serialized chars/4 is a heuristic,
+  not provider usage. No window is exposed: `AUTO_CONTEXT_HANDOVER_SOFT` accepts
+  positive integer tokens only, default `150000`, uncapped. Set it below the
+  configured model's compaction budget before starting Cline. Invalid/empty
+  explicit values log an error and disable notices, not tools.
+- The session's model calls `context_handover({handover, summary})` after a
+  notice or explicit handover request, not ordinary completion, then ends its
+  turn. Both strings stay verbatim; first successful storage wins, no overwrite.
+  Root host identity/snapshot is required; unsupported callers fail explicitly.
+- **Continue manually:** create a fresh session with this plugin and prompt it:
+  `Call read_handover({"sessionID":"SOURCE_ID"}) and continue from "Prioritized next steps".`
+  Reader guidance preserves completed work and predecessor evidence; no pasted
+  full seed is needed. Any equipped caller can read any retained id. Full text
+  appears once with source identity and diagnostics; missing observations stay
+  unknown. Handover-only seed >50% of recorded soft warns, never gates/rewrites.
+- Storage: `~/.cline/auto-context-handover/<sha256(session-id)>/handover.json`,
+  new directories/files 0700/0600. This path follows HOME, not host `--data-dir`
+  or XDG overrides. No quota/TTL/eviction/session-deletion cleanup; retention is
+  manual. Same-user files are not a sandbox; interrupted writes may leave temps,
+  and atomic publication is not fsync durability.
+- No automatic creation/UI switching, source lock, hard gate, stop interception,
+  model/override preservation or child integration. Native compaction is
+  unchanged and can run before measurement. Real model compliance/continuation
+  remain unverified. [Capabilities and non-model evidence](docs/research/cline.md).
 
 ## Pi (root-session adapter)
 

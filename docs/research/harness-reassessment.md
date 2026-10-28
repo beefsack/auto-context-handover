@@ -6,7 +6,7 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 
 | Harness | Verdict | Rank | Relative effort |
 | --- | --- | --- | --- |
-| Cline via hook-bearing AgentExtension (`@cline/core` 0.2.0; CLI install documented, CLI package unpinned) | Feasible MVP | 1 | S (at or below Pi; below Crush/Codex) |
+| Cline via hook-bearing AgentExtension (`@cline/core` 0.2.0; subsequent official CLI pin `cline@3.0.74`) | [Root advisory/manual MVP shipped](cline.md) | 1 | S (at or below Pi; below Crush/Codex) |
 | Amp (`@ampcode/plugin` 0.0.0-20261028101742-g93a0da1) | Feasible advisory-first MVP | 2 | M (above Pi, near Crush) |
 | Goose (source `block/goose@ee8500d`) | Conditional MVP only (poll + denial gate + manual continuation) | 3 | M (wiring cost, no host feature work) |
 | Cursor editor / CLI | Blocked for measured pre-compaction MVP; storage/manual-only integration feasible in editor, CLI trigger unverified | - | M if measurement unblocked (MCP + hooks, above Pi) |
@@ -16,6 +16,10 @@ Assessment date: 2026-10-29. Scope: minimum viable adapter = any defensible meas
 Next assessment order (not implementation rank): Kilo first (fast-track source-backed candidate), then Qwen / OpenHands / Kiro CLI follow-ups.
 
 ## Cline: feasible via hook-bearing AgentExtension
+
+Subsequent implementation pins official `cline@3.0.74` with SDK `0.2.0` and
+observes isolated package install/load; [current assessment](cline.md).
+The following screen's CLI-unpinned caveat is historical, not a current blocker.
 
 - Measurement: `beforeModel` receives the complete request; estimator applies `chars/4` over the full request (`systemPrompt`, `messages`, `tools`, `modelTools`) and labels it a heuristic. Usage accumulation semantics are NOT established by the shipped declarations (`usage` on the snapshot, `Partial<AgentUsage>` on `usage-updated` events): usage is not a proven window meter, and per-run `result.usage` deltas MUST NOT be summed as window state ([plugins](https://docs.cline.bot/sdk/plugins), [agent declarations](https://unpkg.com/@cline/shared@0.2.0/dist/agent.d.ts)).
 - Injection: `beforeRun`/`beforeTool`/`afterTool` `appendContext` (in-process, no system-priority claim); `beforeModel` message/tool/option replacement is the strongest directive path; `beforeTool` `skip` + `reason` with policy ([plugins](https://docs.cline.bot/sdk/plugins)).

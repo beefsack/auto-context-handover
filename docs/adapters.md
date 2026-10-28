@@ -144,6 +144,28 @@ Real pinned loader registration is observed without Electron or a model;
 | 11 | Working-directory plugin files scoped by sha256(taskId), new directories/files 0700/0600; immutable first-writer handover/summary. No quota/TTL/eviction or task-deletion cleanup; manual retention, worktree removal/movement can lose readback. Latest hook diagnostics; unknown after reload. Shared-directory isolation fixture-covered. |
 | 12 | Full readback only; any equipped root may read any loaded task in the current project through host lookup. No arbitrary-path or parent-only authorization. Host-recorded task/effective model, no authored provenance/override inference. |
 
+## Cline CLI/SDK root MVP
+
+Official `cline@3.0.74`, SDK/core/shared `0.2.0`:
+[capabilities, citations and non-model evidence](research/cline.md).
+Package installation and real loader checks do not establish model compliance
+or successful fresh-session continuation. Native children are out of scope.
+
+| # | Cline status against the requirement above |
+| --- | --- |
+| 1 | Root beforeRun appendContext introduction, transient beforeModel notices reference it. First-request hook context, no system-prefix rewrite/priority guarantee. Fixture-covered; compliance unverified. |
+| 2 | Direct context_handover/read_handover tools, plain JSON schemas, no deferred loader. Real registration observed; host/plugin/tool policies can hide tools. |
+| 3 | Introduction/notices define current-step boundary, final-report replacement and plugin-storage permission in read-only tasks. Advisory, fixture-covered. |
+| 4 | Full exposed request serialized chars/4 heuristic (system/messages/tools/modelTools), fixed shared stages. Integer soft default 150000 uncapped; no hook window/percent support. Invalid config disables notices, serialization unknown fails open. No hard gate. |
+| 5 | Absent automatic continuation: user creates a fresh equipped session and supplies source reader reference. No parent preauthorization or automatic SDK start. |
+| 6 | n/a child replacement/count rules. No model/override preservation promise or model selection. |
+| 7 | n/a child handback. Writer stores model-authored strings and advises ending the turn; final delivery/stop compliance unverified. |
+| 8 | No source lock or stop correction. Source remains usable but first stored handover cannot be overwritten; manual recovery on corrupt storage. |
+| 9 | Fresh-root reference reader, full text once and shared no-repeat/predecessor-evidence/title framing. Recorded source session/agent id; no original-task capture, child lineage or automatic seed. |
+| 10 | Verbatim model text; stored-handover-only ceil(chars/4) >50% of recorded soft warns/compression advice only. No fixed generation cap, growth classification or loop guard. |
+| 11 | HOME-based private new directories/files 0700/0600, hashed source ids, atomic immutable first-writer publication. No quota/TTL/eviction/deletion cleanup/fsync guarantee; temps may remain. Latest request diagnostics, unknown after reload. |
+| 12 | Full readback only; any equipped caller (including children) may read any retained id, no arbitrary path or parent-only policy. Host-bound root snapshot authorizes writes, repeated instance setup refused. Effective model/override unknown, not inferred from authored prose. |
+
 ## Notes
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
@@ -162,6 +184,9 @@ Real pinned loader registration is observed without Electron or a model;
 - AiderDesk intentionally differs: root Agent-mode heuristic measurement and
   advisory/storage-only manual continuation, no source lock/UI following; native
   subagents and built-in handoff/compaction are not repurposed.
+- Cline intentionally differs: root full-request heuristic and direct SDK hooks,
+  HOME-based file storage and manual reference continuation; no hook-window
+  resolution, automatic creation, child workflow or source lock.
 - Gemini CLI rows are historical, superseded as a target by the [Antigravity CLI assessment](research/antigravity-cli.md);
   Antigravity CLI itself is assessed docs-only with no shipped implementation.
 - Live retest shape for the pending Claude rows: [Claude parent continuation retest](../README.md#claude-parent-continuation-retest).
