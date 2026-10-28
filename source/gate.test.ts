@@ -6,6 +6,7 @@ import assert from "node:assert/strict"
 import type { Plugin } from "@opencode/plugin"
 import plugin from "./index.ts"
 import { buildChildHardDirective, buildChildNudge, buildHardDirective, buildLockedChildDirective, buildLockedChildReturn, buildNudge, buildSubagentReturn, buildSuccessorSeed, HANDOVER_DESCRIPTION } from "./text.ts"
+import { SEED_FRAMING } from "./shared/handover-text.ts"
 
 interface AddedTool {
   name: string
@@ -552,12 +553,14 @@ describe("auto-context-handover harness", () => {
     )
     assert.equal(fake.created.length, 0)
     assert.ok(fake.storage.get("auto-context-handover:lock:ses_child"))
-    assert.match(String(result.content), /^Context handover \(incomplete\): child done/)
+    assert.match(String(result.content), /^Handover stored; end your turn now with exactly the following text as your final message and then stop\.\n\nContext handover \(incomplete\): child done/)
     assert.match(String(result.content), /NOT complete/)
     assert.match(String(result.content), /rollover/)
     assert.match(String(result.content), /read_handover\(\{"sessionID":"ses_child"\}\)/)
     assert.match(String(result.content), /same agent type/)
-    assert.match(String(result.content), /original task pointer/)
+    assert.match(String(result.content), /do not paste the handover into the spawn prompt/)
+    assert.match(String(result.content), /same logical subagent/)
+    assert.match(String(result.content), /if progress stalls or remaining work grows/)
     assert.match(String(result.content), /Prioritized next steps/)
     assert.match(String(result.content), /completed steps are done/)
     assert.match(String(result.content), /trusted unless marked unverified/)
@@ -1379,12 +1382,16 @@ describe("auto-context-handover harness", () => {
       assert.match(description, /rollover, not task completion/)
       assert.match(description, /Context handover \(incomplete\):/)
       assert.match(description, /same-agent-type successor/)
-      assert.match(description, /original task pointer/)
+      assert.match(description, /same logical subagent/)
+      assert.match(description, /not an additional subagent under subagent-count limits/)
+      assert.match(description, /call read_handover with the predecessor sessionID/)
+      assert.match(description, /do not paste the handover into the spawn prompt/)
       assert.match(description, /Prioritized next steps/)
       assert.match(description, /completed steps are done/)
       assert.match(description, /trusted unless marked unverified/)
       assert.match(description, /do not recast predecessor direct evidence/)
       assert.match(description, /user-owned decisions unrelated to context size/)
+      assert.match(description, /if progress stalls or remaining work grows/)
     })
 
     it("shares the executable next-steps rule", () => {
@@ -1410,8 +1417,9 @@ describe("auto-context-handover harness", () => {
         { handover: "work", summary: "almost done" },
         { sessionID: "ses_prefix", agent: "build" },
       )
-      assert.match(String(plain.content), /^Context handover \(incomplete\): almost done/)
-      assert.match(String(plain.content), /read_handover\(\{"sessionID":"ses_prefix"\}\)/)
+      const text = String(plain.content)
+      assert.match(text, /^Handover stored; end your turn now with exactly the following text as your final message and then stop\.\n\nContext handover \(incomplete\): almost done/)
+      assert.match(text, /read_handover\(\{"sessionID":"ses_prefix"\}\)/)
     })
 
     it("pins byte-identical root nudge and hard-directive wording", () => {
@@ -1485,6 +1493,64 @@ describe("auto-context-handover harness", () => {
       assert.match(childText, /Only the context_handover tool remains available/)
       assert.match(childText, /normally continues in a successor/)
     })
+
+    it("carries the final-report replacement and read-only permission in every child nudge and hard directive", () => {
+      for (const stage of ["warn1", "warn2", "warn3"] as const) {
+        const nudge = buildChildNudge(stage)
+        assert.match(nudge, /handover replaces any required final report/)
+        assert.match(nudge, /read-only task instructions still allow calling the handover tool because it writes only plugin storage/)
+      }
+      const hard = buildChildHardDirective(1500)
+      assert.match(hard, /handover replaces any required final report/)
+      assert.match(hard, /read-only task instructions still allow calling the handover tool because it writes only plugin storage/)
+    })
+  })
+
+  describe("openCode child parity guidance", () => {
+    it("wraps the continuation so the tool result instructs delivery without becoming the delivery", () => {
+      const text = buildSubagentReturn("almost done", "ses_wrap")
+      const wrapper = "Handover stored; end your turn now with exactly the following text as your final message and then stop."
+      assert.ok(text.startsWith(`${wrapper}\n\n`))
+      const [, delivery] = text.split("\n\n")
+      assert.ok(delivery?.startsWith("Context handover (incomplete): almost done"))
+      assert.match(text, /Task is NOT complete; this is a context rollover/)
+      assert.ok(!String(delivery).includes(wrapper))
+    })
+
+    it("references the reader call for successor seeding with quoting robustness", () => {
+      const tricky = 'ses_"q\\u'
+      const text = buildSubagentReturn("done", tricky)
+      const expectedCall = `read_handover({"sessionID":${JSON.stringify(tricky)}})`
+      assert.equal(text.split(expectedCall).length - 1, 2)
+      const parentReadAt = text.indexOf(`Default: read the full handover with ${expectedCall}`)
+      const spawnAt = text.indexOf("then spawn a successor of the same agent type")
+      const successorSeedAt = text.indexOf(`with a prompt instructing it to read the full handover with ${expectedCall}`)
+      assert.ok(parentReadAt >= 0)
+      assert.ok(spawnAt > parentReadAt)
+      assert.ok(successorSeedAt > spawnAt)
+      assert.match(text, /continue from 'Prioritized next steps'/)
+      assert.match(text, /do not paste the handover into the spawn prompt/)
+    })
+
+    it("states same-logical-subagent replacement and stall check-ins while keeping the ask-only rule", () => {
+      const text = buildSubagentReturn("done", "ses_parity")
+      assert.match(text, /continues and replaces the predecessor as the same logical subagent/)
+      assert.match(text, /not an additional subagent under subagent-count limits/)
+      assert.match(text, /ask the user only about handover-listed user-owned decisions unrelated to context size/)
+      assert.match(text, /except checking in with the user is allowed if progress stalls or remaining work grows/)
+    })
+
+    it("leaves the locked-child reply byte-identical to the stored lock text", () => {
+      const expected =
+        `Context handover (incomplete): This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
+        `Default: read the full handover with read_handover({"sessionID":"ses_exact"}), ` +
+        `spawn a successor of the same agent type (or a fresh subagent to investigate and continue), ` +
+        `seed it with the original task pointer and the full handover. ` +
+        `${SEED_FRAMING} ` +
+        `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`
+      assert.equal(buildLockedChildReturn("ses_exact"), expected)
+      assert.match(buildLockedChildDirective("subagent handover returned to parent", "ses_exact"), /Emit ONLY the following locked reply/)
+    })
   })
 
   describe("locked child follow-up and honest status", () => {
@@ -1496,7 +1562,7 @@ describe("auto-context-handover harness", () => {
       const handover = fake.tools.get("context_handover")
       assert.ok(handover)
       const first = await handover.execute({ handover: "body", summary: "work done" }, { sessionID: "ses_init", agent: "build" })
-      assert.match(String(first.content), /^Context handover \(incomplete\): work done/)
+      assert.match(String(first.content), /^Handover stored; end your turn now with exactly the following text as your final message and then stop\.\n\nContext handover \(incomplete\): work done/)
       assert.match(String(first.content), /NOT complete/)
       const retry = await handover.execute({ handover: "more", summary: "x" }, { sessionID: "ses_init", agent: "build" })
       assert.match(String(retry.content), /locked after a context handover/)

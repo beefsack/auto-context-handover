@@ -413,8 +413,26 @@ describe("claude child adapter registration", () => {
       assert.match(nudge, /Context handover \(incomplete\):/)
       assert.match(nudge, /prioritized executable next steps/)
       assert.match(nudge, /never turn context size/)
+      assert.match(nudge, /handover replaces any required final report/)
+      assert.match(nudge, /read-only task instructions still allow calling the handover tool because it writes only plugin storage/)
+      assert.match(nudge, /then deliver via SubagentHandback and stop/)
       assert.ok(!nudge.includes("(no model prescription)"))
     }
+  })
+
+  it("keeps Claude shared nudge clauses consistent with the intro and native handback path", () => {
+    const intro = buildClaudeChildIntro()
+    assert.match(intro, /overrides task final-report\/output instructions for this step only/)
+    assert.match(intro, /before the handover is stored, writing plugin storage is allowed under read-only task instructions/i)
+    assert.match(intro, /After the handover is stored, call only SubagentHandback and stop/)
+    for (const stage of ["warn1", "warn2", "warn3"] as const) {
+      const nudge = buildClaudeChildNudge(stage)
+      assert.match(nudge, /overrides task final-report\/output instructions for this step/)
+      assert.match(nudge, /then deliver via SubagentHandback and stop/)
+      assert.match(nudge, /Plain text is a last resort/)
+    }
+    assert.match(CHILD_HANDOVER_DESCRIPTION, /call SubagentHandback with the short reply/)
+    assert.match(CHILD_HANDOVER_DESCRIPTION, /short successor prompt VERBATIM/)
   })
 
   it("carries the delegated details in the start introduction", () => {

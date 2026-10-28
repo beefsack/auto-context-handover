@@ -114,17 +114,31 @@ calls before completion.
   The seed carries the full handover and backlink; the old session records
   `continued in session <id>`. The TUI follows only if it is still showing the
    source when the successful rollover arrives and after successor lookup.
-- Successor seeds and child-continuation guidance treat the original task as
-  reference context: completed steps are done and must not be repeated;
-  predecessor facts are trusted unless marked unverified, without relabelling
-  their evidence as the successor's direct verification. Targeted re-reads of
-  already-covered material may resolve open questions, not repeat completed
-  steps. Continue from
+- Initial child continuation uses reference seeding: the parent reads the full
+  handover, then spawns a same-agent-type successor with a prompt instructing
+  it to call `read_handover` with the predecessor session ID and continue
+  from "Prioritized next steps"; the handover is never pasted into the spawn
+  prompt. Both treat the original task as reference context: completed steps
+  are done and must not be repeated; predecessor facts are trusted unless
+  marked unverified, without relabelling their evidence as the successor's
+  direct verification. Targeted re-reads of already-covered material may
+  resolve open questions, not repeat completed steps. Continue from
   "Prioritized next steps", independent of section numbering.
-- Lock mode creates no successor. Children always return to their parent:
-  only the short summary, child session ID, and `read_handover` hint. Their
-  stop-lock refuses later questions or work explicitly, with the exact reader
-  call and a successor/fresh-subagent continuation hint, not the old summary.
+- Lock mode creates no successor. A child handover replaces its required
+  final report for that session; before storage, read-only task instructions
+  still allow the handover tool because it writes only plugin storage. The
+  tool result tells the child to end its turn now with exactly the following
+  continuation text as its final message and then stop. The native parent
+  receives the child's latest completed assistant text, not the tool result.
+  The reply carries the short summary, child session ID, and exact
+  `read_handover` call plus the reference-seeding successor instruction. A
+  successor continues and replaces its predecessor as the same logical
+  subagent, not an additional subagent under subagent-count limits. Ask only
+  about handover-listed user-owned decisions, except checking in is allowed
+  if progress stalls or remaining work grows. The child stop-lock refuses
+  later questions or work explicitly, with the exact reader call and a
+  successor/fresh-subagent continuation hint, not the old summary. Claude
+  native `SubagentHandback` delivery is unchanged.
 - The default handover template requires plain disclosure of deviations,
   triggered stop conditions, failed calls and unverified claims. Unresolved
   deviations/stops preclude PASS or completion; summaries must not overclaim.

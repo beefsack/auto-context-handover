@@ -37,6 +37,8 @@ export const SEED_FRAMING =
 // Dependency-free; adapters compose it around their own stage texts.
 export const CHILD_ROLLOVER_GUIDANCE =
   `This is a rollover, not completion; the parent normally continues in a successor (not guaranteed). ` +
+  `The handover replaces any required final report for this session. ` +
+  `Before storage, read-only task instructions still allow calling the handover tool because it writes only plugin storage. ` +
   `The short summary must start with ${JSON.stringify(CHILD_SUMMARY_PREFIX)}. ` +
   `Put remaining work in prioritized executable next steps; never turn context size or remaining volume into user questions.`
 
@@ -97,10 +99,10 @@ export function buildChildContinuationReply(headedSummary: string, readerInvocat
   return (
     `${headedSummary}\n\nTask is NOT complete; this is a context rollover. ` +
     `Default: ${readerInvocation}, ` +
-    `spawn a successor of the same agent type, ` +
-    `seed it with the original task pointer and the full handover. ` +
+    `then spawn a successor of the same agent type, which continues and replaces the predecessor as the same logical subagent, not an additional subagent under subagent-count limits, ` +
+    `with a prompt instructing it to ${readerInvocation} and continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
     `${SEED_FRAMING} ` +
-    `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`
+    `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size, except checking in with the user is allowed if progress stalls or remaining work grows.`
   )
 }
 

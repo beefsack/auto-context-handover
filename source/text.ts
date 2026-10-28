@@ -20,11 +20,12 @@ const HANDOVER_TAIL = `Do not paste secrets. What happens next depends on this s
 const HANDOVER_CHILD_DEFAULT =
   `Child continuation default: this is a context rollover, not task completion. ` +
   `Child summaries must start with ${JSON.stringify(CHILD_SUMMARY_PREFIX)}. ` +
-  `The parent normally continues in a same-agent-type successor seeded with the original task pointer and the full handover. ` +
+  `The parent normally continues in a same-agent-type successor, which continues and replaces the predecessor as the same logical subagent, not an additional subagent under subagent-count limits, ` +
+  `spawned with a prompt instructing it to call read_handover with the predecessor sessionID and continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
   `${SEED_FRAMING} ` +
   `Redirection remains allowed. ` +
   `Never turn context size or remaining volume into user questions; put remaining work in prioritized executable next steps. ` +
-  `Ask the user only about handover-listed user-owned decisions unrelated to context size.`
+  `Ask the user only about handover-listed user-owned decisions unrelated to context size, except checking in with the user is allowed if progress stalls or remaining work grows.`
 
 export const HANDOVER_DESCRIPTION = `${HANDOVER_LEAD}\n\n${HANDOVER_SECTIONS}\n\n${HANDOVER_TAIL}\n\n${HANDOVER_CHILD_DEFAULT}`
 
@@ -103,8 +104,11 @@ export function buildLockModeNotice(sessionID: string, reason: string): string {
 }
 
 export function buildSubagentReturn(summary: string, sessionID: string): string {
-  return buildChildContinuationReply(
+  const continuation = buildChildContinuationReply(
     withChildSummaryPrefix(summary),
     `read the full handover with read_handover({"sessionID":${JSON.stringify(sessionID)}})`,
+  )
+  return (
+    `Handover stored; end your turn now with exactly the following text as your final message and then stop.\n\n${continuation}`
   )
 }
