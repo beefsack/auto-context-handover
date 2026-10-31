@@ -58,9 +58,9 @@ function captureStderr(fn: () => void): string {
 }
 
 describe("config", () => {
-  it("defaults soft to 150000 and accepts positive integers only", () => {
-    assert.equal(DEFAULT_SOFT, 150000);
-    assert.equal(resolveSoft({}), 150000);
+  it("defaults soft to 200000 and accepts positive integers only", () => {
+    assert.equal(DEFAULT_SOFT, 200000);
+    assert.equal(resolveSoft({}), 200000);
     assert.equal(resolveSoft({ [SOFT_ENV]: "200000" }), 200000);
     for (const bad of ["abc", "0", "-5", "1.5", "", "150k", "70%", "0x10", "101%"]) {
       assert.throws(() => resolveSoft({ [SOFT_ENV]: bad }), ConfigError, bad);
@@ -158,9 +158,9 @@ describe("Stop gate", () => {
   it("denies over-soft roots with a stage lead, tool names, and attribution", () => {
     const store = freshStore();
     const cases: Array<{ total: number; lead: string }> = [
-      { total: 150000, lead: OPENCODE_WARN1 },
-      { total: 165000, lead: OPENCODE_WARN2 },
-      { total: 180000, lead: OPENCODE_WARN3 },
+      { total: 200000, lead: OPENCODE_WARN1 },
+      { total: 220001, lead: OPENCODE_WARN2 },
+      { total: 240001, lead: OPENCODE_WARN3 },
     ];
     for (const { total, lead } of cases) {
       const out = handleHook(
@@ -183,7 +183,7 @@ describe("Stop gate", () => {
     const store = freshStore();
     const under = rootExport({ usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 } });
     assert.deepEqual(handleHook(stopPayload(), store, readerFor(under), OPT_IN), {});
-    const over = rootExport({ usage: { input_tokens: 150000, output_tokens: 1, total_tokens: 150001 } });
+    const over = rootExport({ usage: { input_tokens: 200000, output_tokens: 1, total_tokens: 200001 } });
     const reader = readerFor(over);
     const first = handleHook(stopPayload(), store, reader, OPT_IN);
     const second = handleHook(stopPayload(), store, reader, OPT_IN);

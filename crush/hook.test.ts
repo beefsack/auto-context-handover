@@ -10,6 +10,7 @@ import {
   ConfigError,
   DEFAULT_SOFT,
   handleHook,
+  isSupportedCrushVersion,
   parseSoftSpec,
   resolveDataDir,
   resolveSocket,
@@ -53,9 +54,9 @@ function toolPayload(dir: string, toolName: string, toolInput: unknown = {}): Re
 }
 
 describe("config", () => {
-  it("defaults soft to 150000 and accepts integers and percents", () => {
-    assert.equal(DEFAULT_SOFT, 150000);
-    assert.deepEqual(parseSoftSpec({}), { kind: "tokens", tokens: 150000 });
+  it("defaults soft to 200000 and accepts integers and percents", () => {
+    assert.equal(DEFAULT_SOFT, 200000);
+    assert.deepEqual(parseSoftSpec({}), { kind: "tokens", tokens: 200000 });
     assert.deepEqual(parseSoftSpec({ [SOFT_ENV]: "200000" }), { kind: "tokens", tokens: 200000 });
     assert.deepEqual(parseSoftSpec({ [SOFT_ENV]: "70%" }), { kind: "percent", ratio: 0.7 });
   });
@@ -148,7 +149,7 @@ describe("thresholds and nudges", () => {
 
   it("caps integer soft at 70% of the known window", async () => {
     const dir = workspaceDir();
-    // soft 150000 capped to 70000 by the 100000-token window.
+    // soft 200000 capped to 70000 by the 100000-token window.
     const api = fakeApi(dir, {
       getAgent: async () => ({ model: { id: "m", context_window: 100000 } }),
       getSession: async () => ({ id: "ses-1", parent_session_id: "", prompt_tokens: 69999, completion_tokens: 1 }),
@@ -221,7 +222,7 @@ describe("thresholds and nudges", () => {
     const loud: CrushApi = fakeApi(dir, {
       getSession: async () => ({ id: "ses-1", parent_session_id: "", prompt_tokens: 10 ** 9, completion_tokens: 0 }),
     });
-    // Version mismatch (nightly or anything not exactly the release pin).
+    // Version outside the stable major-0 guard (nightly or anything not a stable 0.x.y release).
     assert.deepEqual(await handleHook(toolPayload(dir, "bash"), freshStore(), fakeApi(dir, { getVersion: async () => ({ version: "nightly" }) }), {}), {});
     // Workspace mismatch: cwd is not a known workspace path.
     assert.deepEqual(await handleHook(toolPayload(other, "bash"), freshStore(), loud, {}), {});
@@ -238,6 +239,58 @@ describe("thresholds and nudges", () => {
       },
     };
     assert.deepEqual(await handleHook(toolPayload(dir, "bash"), freshStore(), down, {}), {});
+  });
+});
+
+describe("version guard", () => {
+  it("accepts the assessed version and newer stable patch/minor releases", () => {
+    for (const version of ["v0.98.2", "v0.98.3", "v0.99.0", "v0.100.10", "0.98.2"]) {
+      assert.equal(isSupportedCrushVersion(version), true, version);
+    }
+  });
+
+  it("rejects malformed, missing, nightly, and different-major versions", () => {
+    for (const version of [
+      "nightly",
+      "v0.98.3-nightly",
+      "v0.98.3-0.20261027134723-3538c722ffce",
+      "v1.0.0",
+      "1.2.3",
+      "v0.98",
+      "v0.98.2.1",
+      "",
+      undefined,
+      null,
+      42,
+    ]) {
+      assert.equal(isSupportedCrushVersion(version), false, String(version));
+    }
+  });
+
+  it("binds newer stable releases and still refuses nightly/major bumps", async () => {
+    const dir = workspaceDir();
+    const loud = (version: string): CrushApi =>
+      fakeApi(dir, {
+        getVersion: async () => ({ version }),
+        getSession: async () => ({ id: "ses-1", parent_session_id: "", prompt_tokens: 10 ** 9, completion_tokens: 0 }),
+      });
+    for (const version of ["v0.98.3", "v0.99.0"]) {
+      const out = await handleHook(toolPayload(dir, "bash"), freshStore(), loud(version), {});
+      assert.ok((out as { context: string }).context.includes("soft-limit="), version);
+      const store = freshStore();
+      const read = await handleHook(toolPayload(dir, TOOL_NAMES.read, { sessionID: "x" }), store, loud(version), {});
+      const pending = store.consumePending((read.updated_input as { capability: string }).capability);
+      assert.equal(pending.tool, "read_handover", version);
+      assert.equal(pending.caller.sessionId, "ses-1", version);
+    }
+    for (const version of ["v0.98.3-nightly", "v1.0.0", "nightly"]) {
+      assert.deepEqual(await handleHook(toolPayload(dir, "bash"), freshStore(), loud(version), {}), {}, version);
+      assert.deepEqual(
+        await handleHook(toolPayload(dir, TOOL_NAMES.read, { sessionID: "x" }), freshStore(), loud(version), {}),
+        {},
+        version,
+      );
+    }
   });
 });
 
@@ -272,7 +325,7 @@ describe("own-tool binding", () => {
     const cap = (out.updated_input as { capability: string }).capability;
     const pending = store.consumePending(cap);
     assert.equal(pending.tool, "read_handover");
-    // Default 150000 capped at 70% of the known 200000 window; unknown estimate omits tokens/stage.
+    // Default 200000 capped at 70% of the known 200000 window; unknown estimate omits tokens/stage.
     assert.deepEqual(pending.diagnostics, { reason: "unknown", soft: 140000 });
     const known = freshStore();
     const outKnown = await handleHook(toolPayload(dir, TOOL_NAMES.read, { sessionID: "ses-1" }), known, countersApi(dir, 10, 5), {});

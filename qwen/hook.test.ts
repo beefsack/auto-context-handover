@@ -104,9 +104,9 @@ function preTool(
 }
 
 describe("config", () => {
-  it("defaults to 150000 and accepts positive integers uncapped", () => {
+  it("defaults to 200000 and accepts positive integers uncapped", () => {
     assert.equal(resolveSoft({}), DEFAULT_SOFT);
-    assert.equal(DEFAULT_SOFT, 150000);
+    assert.equal(DEFAULT_SOFT, 200000);
     assert.equal(resolveSoft({ [SOFT_ENV]: "200000" }), 200000);
   });
 

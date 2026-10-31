@@ -18,6 +18,7 @@
 // It never synthesizes a bypass.
 
 import { parseThreshold, type ThresholdSpec } from "../source/shared/threshold.ts"
+import type { TurnStepEvent } from "./claude-types.ts"
 import { seedTooLarge } from "../source/shared/seed-size.ts"
 import {
   CHILD_ROLLOVER_GUIDANCE,
@@ -44,7 +45,7 @@ export const READ_FULL = `mcp__${PLUGIN_NAME}__${READ_TOOL}`
 export const SUCCESSOR_MARKER_TAG = "auto-context-handover:continue"
 
 /** Default child soft threshold in tokens. Uncapped: the child window is unknown. */
-export const CHILD_DEFAULT_SOFT = 150000
+export const CHILD_DEFAULT_SOFT = 200000
 
 /** Start-of-task introduction for `classic.SubagentStart` additionalContext: who installed the plugin and what to do when a notice arrives. */
 export function buildClaudeChildIntro(): string {
@@ -169,6 +170,8 @@ export function childRecordKey(agentId: string): string {
 export interface SpawnProvenance {
   readonly agentType?: string
   readonly modelOverride?: string | null
+  /** Effective request effort observed at handover, not a requested spawn override. */
+  readonly effort?: TurnStepEvent["effort"]
   readonly predecessorAgentId?: string
   readonly originAgentId?: string
   readonly generation?: number
@@ -193,6 +196,7 @@ export function isSpawnProvenance(value: unknown): value is SpawnProvenance {
   const record = value as Record<string, unknown>
   if (record.agentType !== undefined && typeof record.agentType !== "string") return false
   if (record.modelOverride !== undefined && record.modelOverride !== null && typeof record.modelOverride !== "string") return false
+  if (record.effort !== undefined && !isRequestEffort(record.effort)) return false
   if (record.predecessorAgentId !== undefined && typeof record.predecessorAgentId !== "string") return false
   if (record.originAgentId !== undefined && typeof record.originAgentId !== "string") return false
   if (record.generation !== undefined && (typeof record.generation !== "number" || !Number.isInteger(record.generation) || record.generation < 1)) return false
@@ -283,13 +287,19 @@ export function formatModelOverrideReadback(modelOverride?: string | null): stri
   return `(recorded: unknown, use predecessor spawn params)`
 }
 
+export function isRequestEffort(value: unknown): value is NonNullable<TurnStepEvent["effort"]> {
+  return (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" && ["low", "medium", "high", "xhigh", "max"].includes(value))
+}
+
 /** Required read-before-decision sentence for every Claude short reply. */
 export const READ_BEFORE_DECISION = `Read the handover before replying to the user or making any decision about the task.`
 
 export function buildProvenanceReadback(provenance?: SpawnProvenance): string {
   return (
     `Start a successor of the same agent type ${formatAgentTypeReadback(provenance?.agentType)} ` +
-    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)}.`
+    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)} (variant/effort=${provenance?.effort ?? "unknown"}). ` +
+    `Reuse the original spawn parameters, including effort.`
   )
 }
 
@@ -320,6 +330,8 @@ export interface ChildRecord {
   readonly agentType?: string
   /** Requested spawn model override; absent means unknown, null means observed no override. */
   readonly modelOverride?: string | null
+  /** Latest observed request effort at handover; absent means unknown. */
+  readonly effort?: TurnStepEvent["effort"]
   /** Short-marker predecessor child id; absent means origin or unknown (legacy/missing). */
   readonly predecessorAgentId?: string
   /** Chain origin child id; absent means unknown origin (legacy/malformed/missing). */
@@ -1023,9 +1035,9 @@ export function buildChildShortReply(summary: string, agentId: string, provenanc
     `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the handover (compact by default; pass full:true for full texts; recorded successors receive full automatically). ` +
     `${READ_BEFORE_DECISION} ` +
     `Then start a successor of the same agent type ${formatAgentTypeReadback(provenance?.agentType)} ` +
-    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)}, ` +
+    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)} (variant/effort=${provenance?.effort ?? "unknown"}), ` +
     `spawned with the reader's short successor prompt VERBATIM ` +
-    `(marker plus reader instruction to continue from 'Prioritized next steps'; do not paste the handover or original task). ` +
+    `(marker plus reader instruction to continue from 'Prioritized next steps'; reuse the original spawn parameters, including effort; do not paste the handover or original task). ` +
     `The parent may redirect; ${PARENT_DISCRETION}.`
   )
 }
@@ -1059,7 +1071,7 @@ export function buildClaudeSuccessorSeed(childId: string, handover: string, prov
     ? "no override"
     : provenance?.modelOverride || "unknown - use predecessor spawn params"
   return (
-    `Continuing work handed over from subagent ${childId} (agent type: ${agentType}; model override: ${modelOverride}).\n` +
+    `Continuing work handed over from subagent ${childId} (agent type: ${agentType}; model override: ${modelOverride}; variant/effort=${provenance?.effort ?? "unknown"}).\n` +
     `Original task: reference only (load it via ${READ_FULL}({"childId":${JSON.stringify(childId)},"full":true}) alongside this handover; do not repeat completed steps).\n\n` +
     `--- handover from subagent ${childId} (VERBATIM, do not paraphrase) ---\n${handover}\n--- end of handover ---\n\n` +
     `${SUCCESSOR_GUIDANCE}\n\n` +
@@ -1126,10 +1138,10 @@ export function buildLockedChildReply(agentId: string, provenance?: SpawnProvena
     `First call ${READ_FULL}({"childId":${JSON.stringify(agentId)}}) to read the handover (compact by default; pass full:true for full texts; recorded successors receive full automatically). ` +
     `${READ_BEFORE_DECISION} ` +
     `Then start a successor of the same agent type ${formatAgentTypeReadback(provenance?.agentType)} ` +
-    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)} ` +
+    `with the same model override ${formatModelOverrideReadback(provenance?.modelOverride)} (variant/effort=${provenance?.effort ?? "unknown"}) ` +
     `(or a fresh subagent to investigate and continue), ` +
     `spawned with the reader's short successor prompt VERBATIM ` +
-    `(marker plus reader instruction to continue from 'Prioritized next steps'; do not paste the handover or original task). ` +
+    `(marker plus reader instruction to continue from 'Prioritized next steps'; reuse the original spawn parameters, including effort; do not paste the handover or original task). ` +
     `The parent may redirect; ${PARENT_DISCRETION}.`
   )
 }
@@ -1143,6 +1155,7 @@ export function mergeProvenance(primary?: SpawnProvenance, fallback?: SpawnProve
       ...(typeof value.modelOverride === "string" && value.modelOverride.length > 0
         ? { modelOverride: value.modelOverride }
         : value.modelOverride === null ? { modelOverride: null } : {}),
+      ...(isRequestEffort(value.effort) ? { effort: value.effort } : {}),
       ...(typeof value.predecessorAgentId === "string" && value.predecessorAgentId.length > 0
         ? { predecessorAgentId: value.predecessorAgentId } : {}),
       ...(typeof value.originAgentId === "string" && value.originAgentId.length > 0
@@ -1155,7 +1168,7 @@ export function mergeProvenance(primary?: SpawnProvenance, fallback?: SpawnProve
         ? { storedAt: value.storedAt } : {}),
       ...(value.lineageUncertain === true ? { lineageUncertain: true } : {}),
     }
-    return built.agentType === undefined && built.modelOverride === undefined &&
+    return built.agentType === undefined && built.modelOverride === undefined && built.effort === undefined &&
       built.predecessorAgentId === undefined && built.originAgentId === undefined && built.generation === undefined &&
       built.originalCaptureError === undefined && built.storedAt === undefined && built.lineageUncertain === undefined
       ? undefined
@@ -1169,6 +1182,7 @@ export function mergeProvenance(primary?: SpawnProvenance, fallback?: SpawnProve
     agentType: first.agentType ?? second.agentType,
     ...(first.modelOverride !== undefined ? { modelOverride: first.modelOverride }
       : second.modelOverride !== undefined ? { modelOverride: second.modelOverride } : {}),
+    ...(first.effort ?? second.effort) === undefined ? {} : { effort: first.effort ?? second.effort },
     ...(first.predecessorAgentId ?? second.predecessorAgentId) === undefined ? {}
       : { predecessorAgentId: (first.predecessorAgentId ?? second.predecessorAgentId) as string },
     ...(first.originAgentId ?? second.originAgentId) === undefined ? {}

@@ -11,7 +11,7 @@ import {
 import { baseDirFromEnv, GooseStore } from "./store.ts";
 import { buildStopDenial, SESSION_BANNER } from "./text.ts";
 
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 export const SOFT_ENV_VAR = "AUTO_CONTEXT_HANDOVER_SOFT";
 export const STOP_OPT_IN_ENV_VAR = "AUTO_CONTEXT_HANDOVER_GOOSE_STOP";
 

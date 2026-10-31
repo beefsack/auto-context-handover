@@ -2,8 +2,8 @@
 
 Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
 
-Also includes a [Pi root-session adapter](#pi-root-session-adapter) (0.73.1,
-manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
+Also includes a [Pi root-session adapter](#pi-root-session-adapter) (assessed
+against 0.73.1, manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
 and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
@@ -23,14 +23,52 @@ calls. The bundled TUI companion follows successful root rollovers when you
 are still viewing the old session. It never switches you away from another
 session or shows review/confirmation UI. Desktop and web do not auto-follow.
 
+## Supported harnesses
+
+Non-OpenCode adapters have no hard token gate; live model compliance remains unverified.
+
+| Harness | Status | Scope | Known issues / missing functionality |
+| --- | --- | --- | --- |
+| [OpenCode (primary)](#behavior) | Supported | Automatic root rollover + subagents; opt-in hard limit | Held at `~2.1` (2.2.0 removed `Message`); root successors cannot resume background children |
+| [Claude Code](#claude-code-subagent-only-adapter) | Supported | Subagents only; roots intro/read only | 10-35% batch overshoot; hard limit pending, parent continuation advisory |
+| [Codex CLI](#codex-cli-subagent-first-adapter) | Supported | Subagent-first | Undocumented source-only `PostModelRequest`; integer-only uncapped soft, live untested |
+| [GitHub Copilot CLI](#github-copilot-cli-subagent-first-adapter) | Supported | Child-first | Experimental extension API, live untested; general-purpose children lack lifecycle hooks |
+| [Cline CLI/SDK](#cline-clisdk-root-adapter) | Supported | Root advisory; manual continuation | Chars/4 estimate; VS Code extension unsupported, live untested |
+| [Pi](#pi-root-session-adapter) | Supported | Root; user `/handover`, then automatic seeded successor | No subagent support; live untested |
+| [Kilo](#kilo-root-session-adapter) | Supported | Root advisory; manual continuation | Experimental transform hook; extension runtime unverified, live untested |
+| [AiderDesk](#aiderdesk-root-agent-task-adapter) | WIP/untested | Root Agent mode; manual continuation | Automatic fresh-task initialization unverified |
+| [Amp](#amp-focused-root-adapter) | WIP/untested | Focused root; automatic successor thread | No chain cap |
+| [Crush](#crush-root-session-adapter) | WIP/untested | Root; opt-in automatic successor via local server socket | Native children unsupported; one-response counter lag, no chain cap |
+| [Qwen Code](#qwen-code-subagent-first-adapter) | WIP/untested | Subagent-first | Integer-only uncapped soft |
+| [Goose](#goose-root-session-adapter) | WIP/untested | Root; manual continuation | Notices only via opt-in Stop denials |
+| [OpenHands](#openhands-sdk-adapter) | WIP/untested | Python SDK helper; manual continuation | No CLI; notices only on next user prompt |
+| Antigravity CLI | Blocked | No adapter | No hook-readable child measurement/parent identity; MCP caller binding unestablished |
+| Cursor | Blocked | Editor/CLI; no adapter | No measured pre-compaction boundary |
+| Cline VS Code extension | Blocked | No adapter | File hooks lack usage/per-request measurement |
+| Hermes Agent | Planned | To assess | No adapter |
+| Windsurf/Devin Desktop | Planned | To assess | No adapter |
+| Warp | Planned | To assess | No adapter |
+| Kiro | Not pursued | No adapter | - |
+| Zed | Not pursued | No adapter | - |
+| Mistral Vibe | Not pursued | No adapter | - |
+| OpenClaw | Not pursued | No adapter | - |
+| Aider | Not pursued | No adapter | - |
+| Gemini CLI | Dropped | No adapter | Replaced by Antigravity CLI |
+| Roo Code | Dropped | No adapter | Discontinued |
+
 ## Install (local directory)
+
+Adapters target the latest harness releases and accept update breakage. Exact
+versions below identify assessment evidence, not installation pins. Necessary
+compatibility ranges stop at major or major.minor: OpenCode currently uses
+`~2.1` because 2.2.0 removes the `@opencode/ai` `Message` export used here.
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     { "package": "/absolute/path/to/auto-context-handover", "options": {
-      "soft": 150000
+      "soft": 200000
     } }
   ]
 }
@@ -50,7 +88,7 @@ a clean host restart; inspect load errors before accepting live test evidence.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `soft` | `150000` | Warn threshold: positive integer tokens or a percentage string. No ratios. Integers resolve as `min(value, floor(0.7 * window))`; percentages use their requested percentage without the cap. Precedence: child prompt marker > agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
+| `soft` | `200000` | Warn threshold: positive integer tokens or a percentage string. No ratios. Integers resolve as `min(value, floor(0.7 * window))`; percentages use their requested percentage without the cap. Precedence: child prompt marker > agent override > `"provider/model"` > bare `"model"` > this value, resolved against the request's model only. |
 | `hard` | unset | Opt-in hard gate, same formats. Past it, every tool except `context_handover` is removed for that request. |
 | `modelOverrides` | `{}` | e.g. `{"anthropic/claude-opus-4-6": "60%", "gpt-5": 90000}`; validated independently. |
 | `agentOverrides` | `{}` | e.g. `{"build": "80%"}` (highest configured precedence); validated independently. |
@@ -66,7 +104,7 @@ Full example:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     { "package": "/absolute/path/to/auto-context-handover", "options": {
-      "soft": 150000,
+      "soft": 200000,
       "hard": "95%",
       "modelOverrides": { "anthropic/claude-opus-4-6": "60%" },
       "agentOverrides": { "build": "80%" },
@@ -80,7 +118,7 @@ Full example:
 Low-threshold testing: `{ "soft": 2000, "hard": 4000 }` forces warn/hard
 quickly. Thresholds resolve against the model catalog window (`limit.input`
 preferred, else `limit.context`). Integer soft values resolve as
-`min(value, floor(0.7 * window))`, so the default is 150000 tokens or 70% of
+`min(value, floor(0.7 * window))`, so the default is 200000 tokens or 70% of
 the window, whichever is smaller. The same cap applies to configured integers;
 explicit percentages remain uncapped. Hard limits are uncapped and take priority
 when reached, even if below soft. With an unknown window, integer soft still
@@ -121,13 +159,14 @@ calls before completion.
 - Append a stable, per-request stage nudge to the END of messages, not the
   initial system prompt. The model finishes its unit and calls
   `context_handover({handover, summary})`; text is stored verbatim.
-- Primary rollover creates a ROOT with the active agent/model and original
+- Primary rollover creates a ROOT with the active agent/model/variant and original
   directory. Readiness, links, and source lock precede successor prompting.
   The seed carries the full handover and backlink; the old session records
   `continued in session <id>`. The TUI follows only if it is still showing the
    source when the successful rollover arrives and after successor lookup.
 - Initial child continuation uses reference seeding: the parent reads the full
-  handover, then spawns a same-agent-type successor with a prompt instructing
+  handover, then spawns a same-agent-type successor using the same model and
+  variant/effort, with a prompt instructing
   it to call `read_handover` with the predecessor session ID and continue
   from "Prioritized next steps"; the handover is never pasted into the spawn
   prompt. Both treat the original task as reference context: completed steps
@@ -136,6 +175,9 @@ calls before completion.
   direct verification. Targeted re-reads of already-covered material may
   resolve open questions, not repeat completed steps. Continue from
   "Prioritized next steps", independent of section numbering.
+- OpenCode readback, root seeds and child replies state the observed
+  variant/effort and require reuse. Unavailable values are `unknown`; reuse
+  the predecessor's original spawn parameters including effort, never usage-based guesses.
 - Lock mode creates no successor. A child handover replaces its required
   final report for that session; before storage, read-only task instructions
   still allow the handover tool because it writes only plugin storage. The
@@ -163,8 +205,8 @@ calls before completion.
 
 ## Kilo (root-session adapter)
 
-Targets **Kilo CLI 7.8.23** (`@kilocode/cli`) and the current CLI-backed
-**Kilo Code VS Code extension 7.8.23** plugin contract. CLI loading/registration
+Targets latest **Kilo CLI** (`@kilocode/cli`) and the current CLI-backed
+**Kilo Code VS Code extension** plugin contract (assessed against 7.8.23). CLI loading/registration
 is observed; extension loading and model compliance are unverified. Legacy
 Roo-derived Kilo extension releases are not supported. The OpenCode V2 root
 entry does not load on Kilo's different API; use `kilo/index.ts` instead.
@@ -176,7 +218,7 @@ Run `npm install` in this intact checkout, then merge into project `kilo.json`
 {
   "$schema": "https://app.kilo.ai/config.json",
   "plugin": [
-    ["file:///absolute/path/to/auto-context-handover/kilo/index.ts", { "soft": 150000 }]
+    ["file:///absolute/path/to/auto-context-handover/kilo/index.ts", { "soft": 200000 }]
   ]
 }
 ```
@@ -193,7 +235,7 @@ Run `npm install` in this intact checkout, then merge into project `kilo.json`
   later host overhead/media/pruning changes are not modeled. Summary-worker
   usage and pre-summary retained-tail anchors are excluded; after compaction
   measurement waits for fresh ordinary usage. Unknowns produce no notice.
-- `soft` defaults to 150000; integers cap at 70% of the request model's catalog
+- `soft` defaults to 200000; integers cap at 70% of the request model's catalog
   context window. Percentage strings use their explicit percentage. Unknown
   window: integers uncapped, percentages silent. The tuple option overrides
   `AUTO_CONTEXT_HANDOVER_SOFT`; invalid values disable notices, not tools.
@@ -226,7 +268,7 @@ drops per-argument descriptions; the complete tool descriptions remain intact.
 
 ## Goose (root-session adapter)
 
-Targets Goose **v1.56.0**. Requires Node >=22.18 and `npm install` in this
+Targets latest Goose (assessed against v1.56.0). Requires Node >=22.18 and `npm install` in this
 intact checkout; no build. Install only the Goose subdirectory, not the
 repository root (its manifests serve other harnesses). For project scope:
 
@@ -247,7 +289,7 @@ PATH). The host-wide cap also affects other Stop hooks:
 
 ```sh
 export AUTO_CONTEXT_HANDOVER_GOOSE_STOP=1
-export AUTO_CONTEXT_HANDOVER_SOFT=150000
+export AUTO_CONTEXT_HANDOVER_SOFT=200000
 export GOOSE_STOP_HOOK_BLOCK_CAP=1
 # Optional if goose is not on PATH:
 export AUTO_CONTEXT_HANDOVER_GOOSE_BIN=/absolute/path/to/goose
@@ -259,7 +301,7 @@ export AUTO_CONTEXT_HANDOVER_GOOSE_BIN=/absolute/path/to/goose
   host-bound caller, including children, may read any retained id.
 - `Stop` reads the last persisted provider usage, never cumulative billing.
   Fixed stages at soft, soft x 1.1 and soft x 1.2. Integer-only soft defaults to
-  150000, uncapped (window unknown). Invalid configuration logs an error and
+  200000, uncapped (window unknown). Invalid configuration logs an error and
   disables notices, not storage/readback. Unknown usage/export failures allow
   stopping. Export is bounded to 15 seconds/16 MiB.
 - A denial forces another model turn; it is hidden from the user but visible
@@ -294,7 +336,8 @@ unverified; executable checks and fixtures do not establish them.
 
 ## Amp (focused-root adapter)
 
-Targets `@ampcode/plugin@0.0.0-20261028101742-g93a0da1`; offline load checked
+Targets latest `@ampcode/plugin` (assessed against `0.0.0-20261028101742-g93a0da1`);
+offline load checked
 with Amp CLI `0.0.1793203246-g5eab6d`. Amp runs TypeScript directly; no build
 or runtime package import is needed. Keep this checkout intact (shared imports
 are outside `amp/`). Create this real forwarding file in
@@ -318,7 +361,7 @@ lists registered plugins when connected. Do not copy only `amp/index.ts`.
   System prompt, tool schemas, deferred modules and image tokens are excluded:
   this can undercount and is not a mathematical lower bound or exact usage.
 - `AUTO_CONTEXT_HANDOVER_SOFT` accepts positive integer tokens only, default
-  `150000`, uncapped (window unknown). Set below the model's compaction budget
+  `200000`, uncapped (window unknown). Set below the model's compaction budget
   before launching Amp. Invalid/empty values log and disable notices, not tools.
   Shared stages apply at soft, soft x 1.1 and soft x 1.2; unknowns fail open.
 - The model calls `context_handover({handover, summary})` after a notice or
@@ -344,13 +387,14 @@ lists registered plugins when connected. Do not copy only `amp/index.ts`.
 
 ## Cline CLI/SDK (root adapter)
 
-Targets official `cline@3.0.74` and `@cline/sdk@0.2.0`, not legacy `clite`.
+Targets latest official `cline` and `@cline/sdk` (assessed against `cline@3.0.74`
+and `@cline/sdk@0.2.0`), not legacy `clite`.
 Install this repository as a package, not just `cline/index.ts` (which imports
 shared files). Node >=22.18; no build step. From this repository run `npm install`,
 then:
 
 ```sh
-npm install -g cline@3.0.74
+npm install -g cline@latest
 cline plugin install /absolute/path/to/auto-context-handover --cwd /absolute/path/to/project
 ```
 
@@ -364,7 +408,7 @@ must call `createClineHandoverPlugin()` once per session, never reuse an instanc
   `beforeModel` appends transient staged notices without rewriting the system
   prefix. The complete exposed request's serialized chars/4 is a heuristic,
   not provider usage. No window is exposed: `AUTO_CONTEXT_HANDOVER_SOFT` accepts
-  positive integer tokens only, default `150000`, uncapped. Set it below the
+  positive integer tokens only, default `200000`, uncapped. Set it below the
   configured model's compaction budget before starting Cline. Invalid/empty
   explicit values log an error and disable notices, not tools.
 - The session's model calls `context_handover({handover, summary})` after a
@@ -389,13 +433,13 @@ must call `createClineHandoverPlugin()` once per session, never reuse an instanc
 
 ## Pi (root-session adapter)
 
-Pi package `@mariozechner/pi-coding-agent@0.73.1` loads `pi/index.ts` directly,
+Latest Pi package `@mariozechner/pi-coding-agent` (assessed against 0.73.1) loads `pi/index.ts` directly,
 using the root `package.json` `pi.extensions` manifest. No build or OpenCode
 process is needed. From this repository, run `npm install`, then:
 
 ```sh
 pi install /absolute/path/to/auto-context-handover
-pi --handover-soft 150000
+pi --handover-soft 200000
 ```
 
 For a single launch without package installation:
@@ -411,7 +455,7 @@ pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
   system-prefix rewrite or a system-priority guarantee. Every provider-request
   `context` hook appends a transient stage notice at the end when over soft.
 - `--handover-soft` accepts positive integer tokens or percentage strings.
-  Default `150000`; integers cap at 70% of the host context window, percentages
+  Default `200000`; integers cap at 70% of the host context window, percentages
   are uncapped. Fixed stages: soft, soft x 1.1, soft x 1.2. Unknown tokens
   suppress notices; unknown windows permit integers but not percentages.
   Invalid values report a session-start error and disable advisories, rather
@@ -442,14 +486,14 @@ checks: [Pi assessment](docs/research/pi.md).
 
 ## Codex CLI (subagent-first adapter)
 
-Targets `@openai/codex@0.165.0`. Run `npm install` in this repository first;
+Targets latest `@openai/codex` (assessed against 0.165.0). Run `npm install` in this repository first;
 Node >=22.18 is required. No build or OpenCode host is involved. Register the
 existing repository marketplace and install the root plugin:
 
 ```sh
-npx --yes @openai/codex@0.165.0 plugin marketplace add /absolute/path/to/auto-context-handover
-npx --yes @openai/codex@0.165.0 plugin add auto-context-handover@auto-context-handover
-npx --yes @openai/codex@0.165.0 mcp get auto_context_handover
+npx --yes @openai/codex@latest plugin marketplace add /absolute/path/to/auto-context-handover
+npx --yes @openai/codex@latest plugin add auto-context-handover@auto-context-handover
+npx --yes @openai/codex@latest mcp get auto_context_handover
 ```
 
 Review and trust the installed hooks in Codex `/hooks` before expecting them to
@@ -466,7 +510,7 @@ that installed plugin copy as well.
   poll JSONL or claim a pre-request injection/gate. Unknown usage suppresses
   notices; compaction clears measurements without changing native compaction.
 - Set `AUTO_CONTEXT_HANDOVER_SOFT` in the environment before launching Codex.
-  It accepts positive integer tokens, default `150000`, with fixed stages at
+  It accepts positive integer tokens, default `200000`, with fixed stages at
   soft, soft x 1.1 and soft x 1.2. No percentage/cap: the child window is unknown.
   Invalid values error and make hook-bound tools unavailable, not silently default.
 - Root SessionStart introduces the configured read-then-replace workflow;
@@ -505,13 +549,13 @@ isolated commands: [Codex assessment](docs/research/codex.md).
 
 ## Qwen Code (subagent-first adapter)
 
-Targets **Qwen Code 0.26.3**. Run `npm install` in this repository first;
+Targets latest **Qwen Code** (assessed against 0.26.3). Run `npm install` in this repository first;
 Node >=22.18 is required. No build or OpenCode host is involved. Link the
 bundled `qwen/` subdirectory as an extension (it imports shared files from
 the intact checkout, so link the directory, not a copy):
 
 ```sh
-npm install --global @qwen-code/qwen-code@0.26.3
+npm install --global @qwen-code/qwen-code@latest
 qwen extensions link /absolute/path/to/auto-context-handover/qwen
 ```
 
@@ -535,7 +579,7 @@ Workspace trust, hook/MCP settings and tool allowlists still apply.
   parsed as a child. Child keys are the opaque composite
   `sessionId:agentId`, used for storage and as the reader's `childId`.
 - Set `AUTO_CONTEXT_HANDOVER_SOFT` in the environment before launching Qwen.
-  Positive integer tokens only, default `150000`, uncapped (the child window
+  Positive integer tokens only, default `200000`, uncapped (the child window
   is unknown); fixed stages at soft, soft x 1.1 and soft x 1.2. An invalid
   value disables staged notices but leaves reader/writer identity binding
   working; readback reports unknown soft/stage/estimate, not the default.
@@ -613,7 +657,7 @@ plugin/marketplace source; no OpenCode host is involved.
   qualify by absent `agent_id`. Roots are not measured, nudged, gated or
   rolled over and cannot hand over. Tools register session-wide; parent
   readback remains available. Native compaction is unchanged.
-- `soft` (plugin userConfig, default `150000`): positive integer tokens
+- `soft` (plugin userConfig, default `200000`): positive integer tokens
   only, unbounded (the child window is unknown). No percentages, caps, hard
   gates, loop guards, or per-child markers.
 - The child calls `context_handover` once, then must call `SubagentHandback`
@@ -679,7 +723,9 @@ plugin/marketplace source; no OpenCode host is involved.
   [`agent.spawn`](https://code.claude.com/docs/en/plugins/mods/reference#subagents),
   with `SubagentStart` type fallback, and prescribe the same type/override
   for the successor. Observed absence is `no override`; unavailable or legacy
-  provenance is `unknown, use predecessor spawn params`. Never infer an
+  provenance is `unknown, use predecessor spawn params`. Variant/effort records
+  the existing `turn.step` request's effort, or `unknown` when unavailable;
+  reuse original spawn parameters including effort. Never infer an
   override from usage or the effective/root model. Metadata persists across
   reload in private storage; storage failures can lose provenance. It records
   parameters as this observer saw them, not downstream mod rewrites. The root
@@ -761,9 +807,9 @@ unestablished. No Kiro adapter installation is available.
 
 ## OpenHands SDK adapter
 
-Targets **`openhands-sdk==1.21.0`**, tested with Python3.12. This is a small
+Targets **`openhands-sdk>=1,<2`** (assessed against `1.21.0`), tested with Python3.12. This is a small
 Python composition helper for a local SDK application, **not** a drop-in plugin
-for `openhands` CLI1.16.0, its TUI/ACP or a remote agent server. No build or
+for `openhands` CLI 1.x (assessed against 1.16.0), its TUI/ACP or a remote agent server. No build or
 replacement driver loop. [Capabilities and CLI blockers](docs/research/openhands.md).
 
 ```sh
@@ -798,7 +844,7 @@ at its import location: the hook invokes that file with the current interpreter.
   the next submitted user prompt**. New prompt/tool-result growth is omitted;
   no notice inside autonomous runs. Condensation invalidates old usage until a
   new ordinary response; native condenser stays enabled/unchanged and can run first.
-- `AUTO_CONTEXT_HANDOVER_SOFT` or `HandoverAdapter(soft=...)`: default150000,
+- `AUTO_CONTEXT_HANDOVER_SOFT` or `HandoverAdapter(soft=...)`: default 200000,
   positive integer tokens capped at70% of a known response context_window;
   explicit percentages uncapped. Unknown window disables percentages; unknown
   usage is silent. Invalid/empty explicit values log and disable notices, not tools.
@@ -818,12 +864,12 @@ at its import location: the hook invokes that file with the current interpreter.
   but does not prove model receipt. Failed snapshot writes log, keep fresh memory
   diagnostics and attempt stale-file removal; failed removal can leave stale notices.
 - `PYTHONPATH=openhands python openhands/test_handover_adapter.py` checks the
-  pinned SDK without model execution. Node tests guard shared Python text drift.
+  installed SDK without model execution. Node tests guard shared Python text drift.
   Real model compliance and continuation remain unverified.
 
 ### GitHub Copilot CLI (subagent-first adapter)
 
-Targets **`@github/copilot@1.0.105` experimental CLI extensions** and Node >=22.18.
+Targets latest **`@github/copilot` experimental CLI extensions** (assessed against 1.0.105) and Node >=22.18.
 Install the standalone Copilot directory, not the repository root (which exposes
 the Codex MCP server):
 
@@ -840,7 +886,7 @@ updates. No build or runtime SDK installation: Copilot supplies its SDK.
 
 - Child-only measurement uses the latest attributed whole-window count
   (including system messages and tool definitions), never billing totals.
-  `AUTO_CONTEXT_HANDOVER_SOFT` defaults to `150000`, capped at
+  `AUTO_CONTEXT_HANDOVER_SOFT` defaults to `200000`, capped at
   70% of a known window; explicit percentages such as `70%` use that fraction.
   Unknown/invalid usage stays silent. Staged notices appear after successful tools.
 - Both tools set `defer: "never"` to keep their descriptions available.
@@ -873,9 +919,10 @@ updates. No build or runtime SDK installation: Copilot supplies its SDK.
 
 ## Crush (root-session adapter)
 
-Targets **Crush v0.98.2 only**. Run `npm install` here first; Node >=22.18,
+Targets latest **Crush** (assessed against v0.98.2). Run `npm install` here first; Node >=22.18,
 no build. This is an explicit opt-in local-server integration, not a plugin
 bundle: it can create a root and submit one continuation prompt on your behalf.
+The server version guard accepts stable major-0 releases, not nightlies.
 Use an absolute private Unix socket path for the server you intend to control;
 the adapter never discovers a socket or opens TCP connections.
 
@@ -885,7 +932,7 @@ Set these variables before starting both the server and client:
 export AUTO_CONTEXT_HANDOVER_ROOT="/absolute/path/to/auto-context-handover"
 export AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET="/absolute/private/run/crush.sock"
 export AUTO_CONTEXT_HANDOVER_DATA="/absolute/private/auto-context-handover-data"
-export AUTO_CONTEXT_HANDOVER_SOFT=150000
+export AUTO_CONTEXT_HANDOVER_SOFT=200000
 ```
 
 Create the socket's parent directory privately before starting the server.
@@ -919,7 +966,7 @@ crush --host "unix://$AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET"
   response at tool boundaries and may retain older nonzero values. Estimated
   versus provider-measured usage provenance is unavailable through this API.
   No per-request injection or trailing-result estimate is claimed.
-- Soft accepts positive integer tokens (default `150000`, capped at 70% of a
+- Soft accepts positive integer tokens (default `200000`, capped at 70% of a
   known window) or explicit percentages (uncapped). Unknown usage suppresses
   notices; unknown windows leave integers uncapped and percentages unresolved.
   Invalid configuration errors instead of silently selecting a default.
@@ -957,8 +1004,8 @@ Pinned release/nightly capability table and reproducible non-model checks:
 disabled because fresh-task initialization is not established through the
 pinned public extension API. No end-to-end model run has been verified.
 
-Targets AiderDesk `0.90.0-dev`, source `831d10d`, with shipped extension types
-`@aiderdesk/extensions@0.39.0`. No build or OpenCode host. Run `npm install`
+Targets latest AiderDesk (assessed against `0.90.0-dev`, source `831d10d`), with shipped extension types
+`@aiderdesk/extensions@latest` (assessed against 0.39.0). No build or OpenCode host. Run `npm install`
 in this repository, keep it in place, and create a **real** project extension
 directory with this `index.ts` (replace the absolute path):
 
@@ -986,7 +1033,7 @@ updates; its extension watcher need not observe files outside the entry folder.
   totals or exact provider usage. It estimates system text, tool definitions
   and saved task messages; later extension changes may not be counted.
 - `AUTO_CONTEXT_HANDOVER_SOFT`, set before launching AiderDesk, accepts positive
-  integer tokens or explicit percentages. Default `150000`; integers cap at
+  integer tokens or explicit percentages. Default `200000`; integers cap at
   70% of a known model input window, percentages are uncapped. Fixed shared
   stages: soft, soft x 1.1, soft x 1.2. Zero/error estimates suppress notices;
   unknown windows leave integers uncapped and percentages unresolved. Invalid
@@ -998,14 +1045,15 @@ updates; its extension watcher need not observe files outside the entry folder.
   "Prioritized next steps". Keep the source task loaded and its working
   directory available. The adapter never creates or prompts another task,
   selects a model, transfers context files or records successor lineage.
-- Dedicated `<working-directory>/.auto-context-handover/<sha256(taskId)>/handover.json`
-  retains immutable verbatim handover/summary, first writer wins. The host's
-  `getTaskDir()` is a shared project/worktree directory, not task-private
-  storage; hashed task scopes prevent collisions. New directories/files use
-  0700/0600, not a same-user sandbox. No quota, TTL, automatic eviction or
-  task-deletion cleanup; retained files need manual removal. Removing/changing
-  a worktree can make its handovers unavailable. Atomic publication is not
-  fsync durability; interrupted writes may leave temporary files.
+- Private `~/.aiderdesk/auto-context-handover/<sha256(projectId + '\0' + taskId)>/handover.json`
+  retains immutable verbatim handover/summary, first writer wins. The
+  project-scoped hash keeps identical task ids in different projects
+  isolated; nothing is written inside the project working directory. New
+  directories/files use 0700/0600, not a same-user sandbox. No quota, TTL,
+  automatic eviction or task-deletion cleanup; retained files need manual
+  removal. Files survive worktree moves/removals, but changed project identity
+  prevents normal readback. Atomic publication is
+  not fsync durability; interrupted writes may leave temporary files.
 - Readback includes recorded diagnostics and full text once. Any root with
   these tools can read any loaded task in the current project through host
   lookup, never arbitrary paths; no parent-only authorization is claimed.
@@ -1014,7 +1062,7 @@ updates; its extension watcher need not observe files outside the entry folder.
   prevented. Native handoff/compaction remain unchanged and can still run;
   native handoff's separate generation call is not used to author this handover.
   No seed-size warning or automated continuation. Host-loader registration and
-  27 fake-API tests are non-model-verified; manual continuation, approvals and
+  29 fake-API tests are non-model-verified; manual continuation, approvals and
   model compliance remain unverified.
 
 [Pinned capabilities and reproducible non-model checks](docs/research/aiderdesk.md).

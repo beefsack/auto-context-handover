@@ -215,12 +215,13 @@ class AdapterTest(unittest.TestCase):
         self.assertIn("Refused", obs_text(reader(reader.action_type(sessionID="x"), outsider)))
 
     def test_stage_bounds_and_capping(self):
+        self.assertEqual(ha.DEFAULT_SOFT_TOKENS, 200000)
         self.assertEqual(
             [ha.soft_stage(n, 1000) for n in (999, 1000, 1100, 1200)],
             ["ok", "warn1", "warn2", "warn3"])
-        tokens = ha.parse_threshold(150000)
+        tokens = ha.parse_threshold(200000)
         self.assertEqual(ha.resolve_soft_tokens(tokens, 100000), 70000)
-        self.assertEqual(ha.resolve_soft_tokens(tokens, None), 150000)
+        self.assertEqual(ha.resolve_soft_tokens(tokens, None), 200000)
         pct = ha.parse_threshold("70%")
         self.assertEqual(ha.resolve_soft_tokens(pct, 200000), 140000)
         self.assertIsNone(ha.resolve_soft_tokens(pct, None))

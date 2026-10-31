@@ -1,0 +1,11 @@
+# Default soft limit and handover effort
+
+- Goal: raise the current shared/adapter soft default to 200000 without changing threshold semantics; state known variant/effort at handover and preserve it for successors.
+- Scope: shared defaults and mirrors, current-default documentation/fixtures, OpenCode variant capture/seed/readback/child guidance, and cheaply observable Claude effort or explicit unknown fallback. No new capture for other adapters; historical live evidence stays unchanged.
+- Acceptance: OpenCode root successors use the source effective variant when known; child continuation requires the same model and variant/effort. Claude reports observed effort or unknown and preserves original spawn parameters. Stored handover text remains verbatim.
+- Approach: one bounded implementation unit, inspect its diff, then record product decisions and verification. Investigate the reported high-to-xhigh possibility in source without claiming a live reproduction.
+- Verification: typecheck, JavaScript/TypeScript tests, affected OpenHands Python tests, whitespace and added-diff local-path checks. Nondefault live carry-over remains unverified.
+- Accepted evidence: all adapter defaults/current-default documentation now use 200000; typecheck and 763 JavaScript/TypeScript tests pass, 26 OpenHands Python tests pass, whitespace and added-diff local-path checks are clean. Original backlog/package/dependency diffs are unchanged.
+- OpenCode finding: root creation already forwards the context hook's variant unchanged. Added persistence, readback/seed/reply labels and reuse guidance; fixtures contrast stale session xhigh with active request high. No plugin-side high-to-xhigh cause found.
+- Claude outcome: the existing `turn.step` observer records request effort before tools run and persists it with the handover. Replies, readback and seeds state known effort or unknown; spawn overrides remain distinct. Fixtures cover high/xhigh/numeric effort, handover inside the request, reload, missing/legacy effort and no predecessor-effort inheritance. No usage inference or new observation surface.
+- Outcome: complete within scope. Historical evidence and explicit nondefault fixtures remain unchanged. Nondefault live carry-over and Claude live replacement remain unverified; other adapters receive only shared guidance, with no new effort capture.

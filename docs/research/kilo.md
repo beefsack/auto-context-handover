@@ -1,9 +1,12 @@
 # Kilo adapter: capabilities and evidence
 
-Status (2026-10-29): root advisory/manual MVP in `kilo/`. Pin
+Status (2026-10-29): root advisory/manual MVP in `kilo/`. Assessed
 `@kilocode/cli`, `@kilocode/plugin`, `@kilocode/sdk` **7.8.23** and source
 `722e4656118fbcdad602179ffd8bde0237007e4a`; current CLI-backed VS Code extension
 source also reports `7.8.23`. Legacy Roo-derived extensions are not targeted.
+These versions are evidence, not pins. Development types now use `^7`; npm's
+latest tag resolves 7.8.18, which passes typecheck and fixtures but has not
+received the assessed release's host-loading check.
 [Install](../../README.md#kilo-root-session-adapter),
 [checklist](../adapters.md#kilo-root-session-mvp).
 
@@ -61,7 +64,7 @@ isolated non-model check. None establishes model compliance or continuation.
   reload/loss documentation. The flag is session-scoped; an aborted compaction
   before transform can suppress one later ordinary notice. Integration review
   additionally excluded summary/pre-summary retained-tail usage anchors.
-- Development dependency audit: pinned `@kilocode/plugin@7.8.23` adds high
+- Development dependency audit: assessed `@kilocode/plugin@7.8.23` adds high
   advisories through `effect@4.0.0-beta.83 -> toml@4.3.0` and nested
   `zod@4.1.8`. These nodes are development-only; Kilo imports in the adapter
   are type-only, shipped schemas use existing root `zod@4.6.7`, and the older
@@ -74,10 +77,12 @@ isolated non-model check. None establishes model compliance or continuation.
 
 All HOME/XDG paths and project configuration were isolated. Commands below use
 absolute scratch/checkout placeholders; external plugins enabled (`KILO_PURE`
-unset). No prompts/inference or credentials needed.
+unset). No prompts/inference or credentials needed. Commands target latest per
+current policy; recorded observations remain evidence of the exact assessed
+versions above, not re-verification against current releases.
 
 ```sh
-npm install --prefix "$ISO/install" @kilocode/cli@7.8.23
+npm install --prefix "$ISO/install" @kilocode/cli@latest
 "$ISO/install/node_modules/.bin/kilo" --version
 "$ISO/install/node_modules/.bin/kilo" --help
 # In an isolated project, kilo.json points at the intact checkout's kilo/index.ts:

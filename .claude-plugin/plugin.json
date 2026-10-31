@@ -7,8 +7,8 @@
     "soft": {
       "type": "number",
       "title": "Soft threshold",
-      "description": "Child context threshold in tokens that triggers staged nudges. Positive integer only, uncapped (the child window is unknown). Default 150000.",
-      "default": 150000,
+      "description": "Child context threshold in tokens that triggers staged nudges. Positive integer only, uncapped (the child window is unknown). Default 200000.",
+      "default": 200000,
       "min": 1
     }
   }

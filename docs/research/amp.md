@@ -5,13 +5,14 @@ attempt after model-authored storage and successful turn end. Offline loading
 and fixtures are observed; authenticated routing, model compliance, UI following
 and continuation are unverified. Native compaction is unchanged.
 
-## Pins and primary sources
+## Assessed versions and primary sources
 
 - [P] [Plugins](https://ampcode.com/docs/customize/plugins): TypeScript/default
   function, directory-plugin relative imports, discovery, lifecycle, user-content
   introduction, result replacement, create-and-append examples and subagents.
 - [T] [Shipped declarations](https://unpkg.com/@ampcode/plugin@0.0.0-20261028101742-g93a0da1/index.d.ts):
-  pinned `@ampcode/plugin@0.0.0-20261028101742-g93a0da1` (types-only package),
+  assessed `@ampcode/plugin@0.0.0-20261028101742-g93a0da1` (types-only package;
+  development dependency now unpinned `*`),
   `PluginThread`, `ThreadMessagesOptions`, `PluginToolContext`, event results,
   `Agent` and `CreateAgentThreadOptions`.
 - [A] [Plugin API](https://ampcode.com/docs/plugin-api): Bun execution,
@@ -35,7 +36,7 @@ and continuation are unverified. Native compaction is unchanged.
 
 ## Behavior and limits
 
-- Integer-only AUTO_CONTEXT_HANDOVER_SOFT default 150000, uncapped; no window
+- Integer-only AUTO_CONTEXT_HANDOVER_SOFT default 200000, uncapped; no window
   contract/percent support. Invalid/empty explicit values log and disable notices,
   not tools. Shared soft/1.1/1.2 stages; native compaction can precede any notice.
 - Storage follows HOME (`~/.amp/auto-context-handover/<sha256(thread-id)>/`),

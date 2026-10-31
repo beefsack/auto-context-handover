@@ -23,7 +23,7 @@ export const PLUGIN_NAME = "auto-context-handover";
 export const TOOL_NAME = "context_handover";
 export const READ_TOOL_NAME = "read_handover";
 export const ENV_SOFT = "AUTO_CONTEXT_HANDOVER_SOFT";
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 const STORAGE_LEAF = join(".cline", "auto-context-handover");
 const STORAGE_FILE = "handover.json";
 

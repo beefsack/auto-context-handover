@@ -87,6 +87,7 @@ const asStoredHandover = (value: Record<string, unknown> | undefined): StoredHan
     model: {
       providerID: typeof model.providerID === "string" ? model.providerID : "unknown",
       id: typeof model.id === "string" ? model.id : "unknown",
+      ...(typeof model.variant === "string" ? { variant: model.variant } : {}),
     },
     storedAt: typeof value.storedAt === "number" ? value.storedAt : 0,
     ...(diag === undefined ? {} : { diag }),
@@ -206,7 +207,7 @@ export default Plugin.define({
               text: handover,
               summary,
               agent: toolCtx.agent,
-              model: { providerID: identity.providerID, id: identity.id },
+              model: { providerID: identity.providerID, id: identity.id, ...(identity.variant === undefined ? {} : { variant: identity.variant }) },
               storedAt: Date.now(),
               diag,
             }
@@ -223,7 +224,7 @@ export default Plugin.define({
               // next hook strips all tools and prescribes a locked refusal.
               // No loop accounting for children, and the full
               // handover text is never included in the return.
-              const finalReply = buildSubagentReturn(summary || "Handover stored.", sessionID)
+              const finalReply = buildSubagentReturn(summary || "Handover stored.", sessionID, identity)
               try {
                 await ctx.storage.set(
                   keys.lock(sessionID),
@@ -253,7 +254,7 @@ export default Plugin.define({
 
             // Primary rollover. Progress uses the hook's pre-call snapshot:
             // the current turn already contains this handover output.
-            const seed = buildSuccessorSeed(handover, sessionID)
+            const seed = buildSuccessorSeed(handover, sessionID, identity)
             const fullSeedEstimate = Math.ceil(seed.length / 4)
             const recorded = lastUsage.get(sessionID)
             const back = asStoredLink(await readStrict(ctx, keys.back(sessionID), "predecessor link"))
@@ -462,12 +463,13 @@ export default Plugin.define({
             `Handover from session ${target} (agent ${stored.agent})` +
             (links.length > 0 ? ` [${links.join("; ")}]` : "") +
             ":"
+          const modelLine = `Effective model: ${stored.model.providerID}/${stored.model.id}; variant/effort=${stored.model.variant ?? "unknown"}. Reuse this model and variant/effort for the successor; if unknown, reuse the predecessor's original spawn parameters including effort.`
           const diagLine = formatDiagLine(stored.diag)
           // Direct route plus pre-set bypass: the host otherwise truncates
           // long tool output and spills it to a file (core/tool-output.ts).
           // A full read can consume large context; the soft-limit estimator
           // sees the result after its anchor, so this is expected behavior.
-          return { content: `${header}\n${diagLine}\n\n${stored.text}`, metadata: { truncated: false } }
+          return { content: `${header}\n${modelLine}\n${diagLine}\n\n${stored.text}`, metadata: { truncated: false } }
         },
       })
     })

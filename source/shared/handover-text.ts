@@ -95,9 +95,10 @@ export function withChildSummaryPrefix(summary: string): string {
  * Shared child continuation reply. The reader invocation is
  * adapter-specific (exact tool call with the adapter's ID argument).
  */
-export function buildChildContinuationReply(headedSummary: string, readerInvocation: string): string {
+export function buildChildContinuationReply(headedSummary: string, readerInvocation: string, variantEffort = "unknown"): string {
   return (
     `${headedSummary}\n\nTask is NOT complete; this is a context rollover. ` +
+    `Effective model/variant/effort=${variantEffort}; the parent must reuse the same model and variant/effort. If unavailable, reuse the predecessor's original spawn parameters including effort; never infer effort from usage. ` +
     `Default: ${readerInvocation}, ` +
     `then spawn a successor of the same agent type, which continues and replaces the predecessor as the same logical subagent, not an additional subagent under subagent-count limits, ` +
     `with a prompt instructing it to ${readerInvocation} and continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
@@ -117,7 +118,7 @@ export function buildLockedChildFollowup(readerInvocation: string): string {
   return (
     `${CHILD_SUMMARY_PREFIX} This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
     `Default: ${readerInvocation}, ` +
-    `spawn a successor of the same agent type (or a fresh subagent to investigate and continue), ` +
+    `spawn a successor of the same agent type and model and variant/effort (or a fresh subagent to investigate and continue); if unavailable, reuse the predecessor's original spawn parameters including effort, ` +
     `seed it with the original task pointer and the full handover. ` +
     `${SEED_FRAMING} ` +
     `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`

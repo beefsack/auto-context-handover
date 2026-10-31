@@ -75,6 +75,7 @@ import {
   isChildRecord,
   isChildTombstone,
   isOriginalRecord,
+  isRequestEffort,
   isSpawnProvenance,
   mergeProvenance,
   orderEvictableChains,
@@ -156,6 +157,7 @@ const provenanceOf = (record: ChildRecord | ChildTombstone | undefined): SpawnPr
   const override = (raw as { modelOverride?: unknown }).modelOverride
   const modelOverride =
     typeof override === "string" && override.length > 0 ? override : override === null ? null : undefined
+  const effort = isRequestEffort(raw.effort) ? raw.effort : undefined
   const predecessorAgentId = typeof raw.predecessorAgentId === "string" && raw.predecessorAgentId.length > 0
     ? (raw.predecessorAgentId as string)
     : undefined
@@ -165,10 +167,11 @@ const provenanceOf = (record: ChildRecord | ChildTombstone | undefined): SpawnPr
   const generation = typeof raw.generation === "number" && Number.isInteger(raw.generation) && raw.generation >= 1
     ? (raw.generation as number)
     : undefined
-  if (agentType === undefined && modelOverride === undefined && predecessorAgentId === undefined && originAgentId === undefined && generation === undefined) return undefined
+  if (agentType === undefined && modelOverride === undefined && effort === undefined && predecessorAgentId === undefined && originAgentId === undefined && generation === undefined) return undefined
   return {
     ...(agentType === undefined ? {} : { agentType }),
     ...(modelOverride === undefined ? {} : { modelOverride }),
+    ...(effort === undefined ? {} : { effort }),
     ...(predecessorAgentId === undefined ? {} : { predecessorAgentId }),
     ...(originAgentId === undefined ? {} : { originAgentId }),
     ...(generation === undefined ? {} : { generation }),
@@ -531,6 +534,7 @@ const quotaDeny = (scan: RetentionScan, key: string): ToolCallResult => ({
 export const register = (on: On, options?: RegisterOptions): void => {
   const soft = options?.soft === undefined ? CHILD_DEFAULT_SOFT : parseChildSoft(options.soft)
   const usageCache = new Map<string, number>()
+  const effortCache = new Map<string, NonNullable<TurnStepEvent["effort"]>>()
   const inflight = new Set<string>()
   const correctedStops = new Set<string>()
   // Actual delivered-nudge provenance, independent of the latest usage.
@@ -604,6 +608,7 @@ export const register = (on: On, options?: RegisterOptions): void => {
 
   const retireMeasurementCaches = (agentId: string): void => {
     usageCache.delete(agentId)
+    effortCache.delete(agentId)
     baselineSeen.delete(agentId)
     growthSeen.delete(agentId)
     baselineEligible.delete(agentId)
@@ -971,6 +976,14 @@ export const register = (on: On, options?: RegisterOptions): void => {
           // turn, the correction latches, and the measurements alone. The
           // post-next guard below skips the measurement update as well.
         } else {
+          // Observe the request before next runs tools, including handover.
+          // Missing effort clears the prior value; usage never supplies it.
+          if (isRequestEffort(event.effort)) effortCache.set(agentId, event.effort)
+          else effortCache.delete(agentId)
+          if (effortCache.size > 1000) {
+            const oldest = effortCache.keys().next()
+            if (!oldest.done) effortCache.delete(oldest.value)
+          }
           if (tracked !== turnId) {
             // New (or resumed) turn: prior handback delivery and the
             // one-correction latch belong to the previous turn only.
@@ -1235,6 +1248,7 @@ export const register = (on: On, options?: RegisterOptions): void => {
           ...(childTurn.get(agentId) === undefined ? {} : { handoverTurnId: childTurn.get(agentId) as string }),
           ...(provenance?.agentType === undefined ? {} : { agentType: provenance.agentType }),
           ...(provenance?.modelOverride === undefined ? {} : { modelOverride: provenance.modelOverride }),
+          ...(effortCache.get(agentId) === undefined ? {} : { effort: effortCache.get(agentId) }),
           ...(provenance?.predecessorAgentId === undefined ? {} : { predecessorAgentId: provenance.predecessorAgentId }),
           ...(provenance?.originAgentId === undefined ? {} : { originAgentId: provenance.originAgentId }),
           ...(provenance?.generation === undefined ? {} : { generation: provenance.generation }),
@@ -1262,10 +1276,11 @@ export const register = (on: On, options?: RegisterOptions): void => {
         // Chain activity for the write rides without a second scan.
         await touchChainActivity($, provenance?.originAgentId ?? agentId)
         usageCache.delete(agentId)
+        effortCache.delete(agentId)
         baselineSeen.delete(agentId)
         growthSeen.delete(agentId)
         baselineEligible.delete(agentId)
-        return { result: buildHandoverStoredInstruction(shortReplyOf(stored, provenance)) }
+        return { result: buildHandoverStoredInstruction(shortReplyOf(stored, provenanceOf(stored))) }
       } finally {
         inflight.delete(agentId)
       }
@@ -1630,6 +1645,7 @@ export const register = (on: On, options?: RegisterOptions): void => {
         // Pin retirement is advisory.
       }
       usageCache.clear()
+      effortCache.clear()
       baselineSeen.clear()
       growthSeen.clear()
       baselineEligible.clear()

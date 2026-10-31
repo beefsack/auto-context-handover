@@ -49,23 +49,23 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@opencode/ai": "2.1.4",
-    "@opencode/schema": "2.1.4",
+    "@opencode/ai": "~2.1",
+    "@opencode/schema": "~2.1",
     "effect": "4.0.1",
     "typebox": "1.4.3"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.1.4"
+    "@opencode/plugin": "~2.1"
   },
   "devDependencies": {
-    "@aiderdesk/extensions": "0.39.0",
-    "@ampcode/plugin": "0.0.0-20261028101742-g93a0da1",
-    "@cline/sdk": "0.2.0",
-    "@github/copilot-sdk": "1.0.28",
-    "@kilocode/plugin": "7.8.23",
-    "@kilocode/sdk": "7.8.23",
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@opencode/plugin": "2.1.4",
+    "@aiderdesk/extensions": "^0",
+    "@ampcode/plugin": "*",
+    "@cline/sdk": "^0",
+    "@github/copilot-sdk": "^1",
+    "@kilocode/plugin": "^7",
+    "@kilocode/sdk": "^7",
+    "@mariozechner/pi-coding-agent": "^0",
+    "@opencode/plugin": "~2.1",
     "@types/node": "22.10.2",
     "typescript": "5.7.3",
     "zod": "4.6.7"

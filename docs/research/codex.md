@@ -113,6 +113,9 @@ ancestor-only authorization is not claimed.
 `ISO` and `REPO` below are required absolute paths: isolated state and this
 repository (with `npm install` already completed). Use a directory under
 `/tmp/opencode` for ISO. No credentials or model selection are required.
+Commands below target latest per current policy; recorded observations remain
+evidence of the exact assessed versions above, not re-verification against
+current releases.
 
 ```sh
 : "${ISO:?}" "${REPO:?}"
@@ -122,13 +125,13 @@ export HOME="$ISO/home" CODEX_HOME="$ISO/codex"
 export XDG_CONFIG_HOME="$ISO/config" XDG_CACHE_HOME="$ISO/cache"
 export npm_config_cache="$ISO/npm-cache" CLAUDE_CONFIG_DIR="$ISO/claude"
 npm view @openai/codex version
-npx --yes @openai/codex@0.165.0 --version
-npx --yes @openai/codex@0.165.0 --help
-npx --yes @openai/codex@0.165.0 plugin marketplace add "$REPO"
-npx --yes @openai/codex@0.165.0 plugin add auto-context-handover@auto-context-handover
-npx --yes @openai/codex@0.165.0 plugin list
-npx --yes @openai/codex@0.165.0 mcp list
-npx --yes @openai/codex@0.165.0 mcp get auto_context_handover --json
+npx --yes @openai/codex@latest --version
+npx --yes @openai/codex@latest --help
+npx --yes @openai/codex@latest plugin marketplace add "$REPO"
+npx --yes @openai/codex@latest plugin add auto-context-handover@auto-context-handover
+npx --yes @openai/codex@latest plugin list
+npx --yes @openai/codex@latest mcp list
+npx --yes @openai/codex@latest mcp get auto_context_handover --json
 claude plugin validate "$REPO"
 ```
 

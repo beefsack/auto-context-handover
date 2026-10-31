@@ -1,6 +1,6 @@
 # Crush adapter assessment and evidence
 
-Status (2026-10-29): **release-pinned root-session MVP** in `crush/`.
+Status (2026-10-29): **root-session MVP** in `crush/`, assessed against release `v0.98.2`.
 The local server provides workspace/session reads, root creation and detached
 prompt admission. Explicit installation enables the adapter to control that
 Unix socket API and continue in a background root. The TUI does not follow.
@@ -13,7 +13,7 @@ vendor Crush code.
 
 ## Release vs nightly (read first)
 
-The released pin is `v0.98.2` (commit
+The assessed release is `v0.98.2` (commit
 `d6329fbd900a5c63a452797b74ff8d1c499aebef`). At that tag, hooks are **PreToolUse-only**: the
 release
 [README](https://github.com/charmbracelet/crush/blob/v0.98.2/docs/hooks/README.md#L22-L22)
@@ -26,11 +26,14 @@ is event/session/cwd/tool/input only. The lifecycle commits
 PostToolUse, `40f57825` unified Event/Runner, `9dac45bd` event-list
 validation) are not ancestors of `v0.98.2`.
 
+The adapter targets latest stable releases within major 0; its server guard
+accepts `v0.<minor>.<patch>` (optional `v`), not an exact patch or a nightly.
+
 Historical lifecycle investigation below also covers **unreleased**
 nightly `3538c722ffce86ce41543df72c6efa4ea5e1672e` (supersedes prior
 nightly `6366afc8`; binary reports
 `v0.98.3-0.20261027134723-3538c722ffce`). Nightly links are not a
-released contract and must be re-verified on every pin bump. Implementation
+released contract and must be re-verified before any support claim. Implementation
 uses only release PreToolUse, static context, MCP and local-server routes.
 Historical nightly-only lifecycle findings are not compatibility promises.
 
@@ -170,7 +173,7 @@ authors the full handover. Storage/closure precede creation; successor id
 precedes admission; no automatic retries. Workspace owns model resolution.
 No original task capture, child lineage, TUI following, hard gate or loop guard.
 
-Integer soft defaults to 150000 and caps at 70% of a known window; percentages
+Integer soft defaults to 200000 and caps at 70% of a known window; percentages
 remain explicit. Unknown usage suppresses notices; unknown-window percentages
 stay unresolved and integers uncapped. Invalid configuration errors. Shared
 seed-size advice uses the full actual seed at ceil(chars/4), warns above 50% of
@@ -212,7 +215,7 @@ an unbound MCP call. Implementation and regression fixtures live in `crush/`.
 - Plain-text follow-ups after handover are advisory-only; never claim a
   universal session stop.
 - Release `v0.98.2` cannot host lifecycle behavior (PreToolUse only);
-   nightly is an unreleased contract, not a release pin.
+   nightly is an unreleased contract, not a supported release.
 - Handover, summary and closure are first-writer immutable private files;
   status is separate. Directories 0700/files 0600, hashed session ids, no quota,
   TTL or eviction; abandoned pending/temp files can remain. Same-user storage

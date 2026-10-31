@@ -23,7 +23,7 @@ import {
 
 export { TOOL_NAMES, successorPrompt };
 
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 export const SOFT_ENV_VAR = "AUTO_CONTEXT_HANDOVER_SOFT";
 export const DATA_DIR_NAME = "auto-context-handover";
 const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;

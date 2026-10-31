@@ -326,6 +326,7 @@ describe("auto-context-handover harness", () => {
     fake.sessions.set("ses_variant", {
       id: "ses_variant",
       agent: "build",
+      model: { providerID: "anthropic", id: "claude", variant: "xhigh" },
       history: [],
     })
     const event = contextEvent("ses_variant", {}, { providerID: "anthropic", id: "claude", variant: "high" }, "build")
@@ -334,6 +335,9 @@ describe("auto-context-handover harness", () => {
     assert.ok(handover)
     await handover.execute({ handover: "did the thing", summary: "done" }, { sessionID: "ses_variant", agent: "build" })
     assert.deepEqual(fake.created[0]?.model, { providerID: "anthropic", id: "claude", variant: "high" })
+    const stored = fake.storage.get("auto-context-handover:handover:ses_variant") as { model: unknown }
+    assert.deepEqual(stored.model, { providerID: "anthropic", id: "claude", variant: "high" })
+    assert.match(String(fake.prompted[0]?.text), /Effective model: anthropic\/claude; variant\/effort=high/)
   })
 
   it("omits variant from the successor model when the request has none", async () => {
@@ -351,6 +355,7 @@ describe("auto-context-handover harness", () => {
     await handover.execute({ handover: "did the thing", summary: "done" }, { sessionID: "ses_novariant", agent: "build" })
     assert.deepEqual(fake.created[0]?.model, { providerID: "anthropic", id: "claude" })
     assert.ok(!("variant" in ((fake.created[0]?.model ?? {}) as Record<string, unknown>)))
+    assert.match(String(fake.prompted[0]?.text), /variant\/effort=unknown/)
   })
 
   it("rotates a primary session to a fresh root and links both ways", async () => {
@@ -578,7 +583,7 @@ describe("auto-context-handover harness", () => {
     await setup(fake)
     fake.sessions.set("ses_src", { id: "ses_src", agent: "build", history: [] })
     fake.sessions.set("ses_other", { id: "ses_other", agent: "build", history: [] })
-    const event = contextEvent("ses_src", {})
+    const event = contextEvent("ses_src", {}, { providerID: "anthropic", id: "claude", variant: "high" })
     await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
     const handover = fake.tools.get("context_handover")
     const read = fake.tools.get("read_handover")
@@ -587,6 +592,7 @@ describe("auto-context-handover harness", () => {
     const stored = await read.execute({ sessionID: "ses_src" }, { sessionID: "ses_other", agent: "build" })
     assert.match(String(stored.content), /verbatim body/)
     assert.match(String(stored.content), /continued in ses_new_1/)
+    assert.match(String(stored.content), /Effective model: anthropic\/claude; variant\/effort=high/)
     const missing = await read.execute({ sessionID: "ses_other" }, { sessionID: "ses_other", agent: "build" })
     assert.match(String(missing.content), /No handover stored/)
     await assert.rejects(read.execute({ sessionID: "missing" }, { sessionID: "ses_other", agent: "build" }), /does not exist/)
@@ -1303,7 +1309,7 @@ describe("auto-context-handover harness", () => {
       return event
     }
 
-    it("caps the 150000 default at 70% on small windows", async () => {
+    it("caps the 200000 default at 70% on small windows", async () => {
       const fake = makeFake({})
       await setup(fake)
       setWindow(fake, 100000)
@@ -1314,13 +1320,13 @@ describe("auto-context-handover harness", () => {
       assert.match(messageText(nudged.messages), /Auto-context-handover (notice|warning|final warning)\./)
     })
 
-    it("leaves the 150000 default untouched on large windows", async () => {
+    it("leaves the 200000 default untouched on large windows", async () => {
       const fake = makeFake({})
       await setup(fake)
       setWindow(fake, 300000)
-      const quiet = await estimateEvent(fake, "ses_large_quiet", 140000)
+      const quiet = await estimateEvent(fake, "ses_large_quiet", 190000)
       assert.equal(quiet.messages.length, 0)
-      const nudged = await estimateEvent(fake, "ses_large_nudged", 155000)
+      const nudged = await estimateEvent(fake, "ses_large_nudged", 205000)
       assert.equal(nudged.messages.length, 1)
     })
 
@@ -1360,7 +1366,7 @@ describe("auto-context-handover harness", () => {
     it("applies integer soft with an unknown window while percent fails open", async () => {
       const integerFake = makeFake({})
       await setup(integerFake)
-      const nudged = await estimateEvent(integerFake, "ses_unk_int", 155000, { providerID: "unknown", id: "nope" })
+      const nudged = await estimateEvent(integerFake, "ses_unk_int", 205000, { providerID: "unknown", id: "nope" })
       assert.equal(nudged.messages.length, 1)
       const percentFake = makeFake({ soft: "70%" })
       await setup(percentFake)
@@ -1409,7 +1415,7 @@ describe("auto-context-handover harness", () => {
       const fake = makeFake({})
       await setup(fake)
       fake.sessions.set("ses_prefix", { id: "ses_prefix", parentID: "ses_parent", agent: "build", history: [] })
-      const event = contextEvent("ses_prefix", {})
+      const event = contextEvent("ses_prefix", {}, { providerID: "anthropic", id: "claude", variant: "high" })
       await fake.hooks.get("context")?.(event as unknown as Record<string, unknown>)
       const handover = fake.tools.get("context_handover")
       assert.ok(handover)
@@ -1420,6 +1426,8 @@ describe("auto-context-handover harness", () => {
       const text = String(plain.content)
       assert.match(text, /^Handover stored; end your turn now with exactly the following text as your final message and then stop\.\n\nContext handover \(incomplete\): almost done/)
       assert.match(text, /read_handover\(\{"sessionID":"ses_prefix"\}\)/)
+      assert.match(text, /variant\/effort=high/)
+      assert.match(text, /reuse the same model and variant\/effort/)
     })
 
     it("pins byte-identical root nudge and hard-directive wording", () => {
@@ -1514,6 +1522,8 @@ describe("auto-context-handover harness", () => {
       const [, delivery] = text.split("\n\n")
       assert.ok(delivery?.startsWith("Context handover (incomplete): almost done"))
       assert.match(text, /Task is NOT complete; this is a context rollover/)
+      assert.match(text, /Effective model\/variant\/effort=unknown/)
+      assert.match(text, /reuse the same model and variant\/effort/)
       assert.ok(!String(delivery).includes(wrapper))
     })
 
@@ -1544,7 +1554,7 @@ describe("auto-context-handover harness", () => {
       const expected =
         `Context handover (incomplete): This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
         `Default: read the full handover with read_handover({"sessionID":"ses_exact"}), ` +
-        `spawn a successor of the same agent type (or a fresh subagent to investigate and continue), ` +
+        `spawn a successor of the same agent type and model and variant/effort (or a fresh subagent to investigate and continue); if unavailable, reuse the predecessor's original spawn parameters including effort, ` +
         `seed it with the original task pointer and the full handover. ` +
         `${SEED_FRAMING} ` +
         `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`

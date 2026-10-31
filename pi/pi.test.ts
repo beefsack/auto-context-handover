@@ -210,7 +210,7 @@ describe("pi thresholds and usage", () => {
     return { result, base };
   };
 
-  it("default soft 150000 capped at 70% of the window", async () => {
+  it("default soft 200000 capped at 70% of the window", async () => {
     // 70% of 200000 = 140000; 150000 estimate clears it.
     const { result, base } = await noticeFor(150000, 200000);
     assert.ok(result && Array.isArray((result as any).messages));
@@ -244,7 +244,7 @@ describe("pi thresholds and usage", () => {
   });
 
   it("unknown window: numerics apply uncapped, percents fail open", async () => {
-    const numeric = await noticeFor(160000, 0, undefined);
+    const numeric = await noticeFor(210000, 0, undefined);
     assert.ok(numeric.result);
     const fake = createFakePi();
     createExtension(fake.api);

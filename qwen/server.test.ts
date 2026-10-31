@@ -322,7 +322,7 @@ describe("reader", () => {
     assert.equal(compact.isError, undefined);
     const text = textOf(compact);
     assert.match(text, /soft-limit=unknown/);
-    assert.ok(!text.includes("against soft limit 150000"), "must not invent the default soft");
+    assert.ok(!text.includes("against soft limit 200000"), "must not invent the default soft");
     const fcap = readCap(store, root, { childId: "ses-i:agent-i", full: true });
     const full = await executeTool(TOOL_NAMES.read, { capability: fcap }, store);
     assert.equal(full.isError, undefined);

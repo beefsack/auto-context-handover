@@ -29,6 +29,7 @@ export interface TurnStepEvent {
   readonly turnId: string
   readonly index: number
   readonly model: string
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max" | number
   readonly messageCount: number
   readonly agentId?: string
 }

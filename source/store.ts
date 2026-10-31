@@ -29,7 +29,7 @@ export interface StoredHandover {
   readonly text: string
   readonly summary: string
   readonly agent: string
-  readonly model: { readonly providerID: string; readonly id: string }
+  readonly model: { readonly providerID: string; readonly id: string; readonly variant?: string }
   readonly storedAt: number
   readonly diag?: StoredDiag
 }

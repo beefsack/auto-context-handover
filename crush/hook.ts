@@ -18,11 +18,18 @@ import {
   TOOL_NAMES,
 } from "./text.ts";
 
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 export const SOFT_ENV_VAR = "AUTO_CONTEXT_HANDOVER_SOFT";
 export const SOCKET_ENV_VAR = "AUTO_CONTEXT_HANDOVER_CRUSH_SOCKET";
-// Release-only pin: the root MVP targets v0.98.2, never an unreleased lifecycle.
+// Assessed release version (evidence, not a pin): isolated checks ran against v0.98.2.
+// The runtime guard below accepts any stable major-0 release so newer
+// minor/patch releases keep working; nightly/unreleased lifecycles stay rejected.
 export const SUPPORTED_CRUSH_VERSION = "v0.98.2";
+
+/** Stable major-0 release contract: `v0.<minor>.<patch>` (optional `v`, no suffix). */
+export function isSupportedCrushVersion(version: unknown): version is string {
+  return typeof version === "string" && /^v?0\.\d+\.\d+$/.test(version);
+}
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -154,7 +161,7 @@ async function observe(api: CrushApi, sessionId: string, cwd: string, softSpec: 
   } catch {
     return undefined;
   }
-  if (version !== SUPPORTED_CRUSH_VERSION) return undefined;
+  if (!isSupportedCrushVersion(version)) return undefined;
   let workspaces: readonly { id: string; path: string }[];
   try {
     workspaces = await api.listWorkspaces();

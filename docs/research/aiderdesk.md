@@ -2,18 +2,18 @@
 
 Status (2026-10-29): **root Agent-mode advisory/storage adapter; manual
 continuation only**. Automatic rollover is removed: fresh background-task
-initialization is not established through the public API. Task-id-scoped storage
-handles shared working directories. Pinned loader registration was observed
+initialization is not established through the public API. HOME storage scoped by
+project identity and task id handles shared working directories. Assessed loader registration was observed
 without Electron or a model; model compliance/manual continuation remain
 unverified. Native children are excluded. [Change note](../changes/archive/aiderdesk-adapter.md).
 
-## Pins and primary sources
+## Assessed versions and primary sources
 
 App: `aider-desk@0.90.0-dev`, commit
 `831d10d65438a7373920b6927231e3ed09445b68` (2026-10-28), Apache-2.0.
 Types/installer: `@aiderdesk/extensions@0.39.0`, npm gitHead
-`efe6f331a9f3d8df8739df2420e0e35d4cf7338d`, MIT. The app source pin and
-published types pin are distinct; both were inspected, and the adapter compiles
+`efe6f331a9f3d8df8739df2420e0e35d4cf7338d`, MIT. The assessed app source and
+published types are distinct; both were inspected, and the adapter compiles
 against the real published declarations. Host Zod is `4.6.7`, jiti `2.6.1`.
 
 - [E] [Events](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/docs-site/docs/extensions/events.md),
@@ -37,7 +37,10 @@ against the real published declarations. Host Zod is `4.6.7`, jiti `2.6.1`.
   discovery at 853-885, validation/registration at 1050-1206, folder copying at 2026-2054.
 - [I] [Installation](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/docs-site/docs/extensions/installation.md),
   [creating extensions](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/docs-site/docs/extensions/creating-extensions.md),
-  [native handoff/compaction](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/docs-site/docs/core/handoff-and-compaction.md).
+   [native handoff/compaction](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/docs-site/docs/core/handoff-and-compaction.md).
+- [V] [Verifier filesystem access](https://github.com/hotovo/aider-desk/blob/831d10d65438a7373920b6927231e3ed09445b68/packages/extensions/extensions/verifier/index.ts#L65-L96):
+  extension-local `config.json` path at line 69, direct `writeFileSync` at line 95.
+  The loader's options (17-24) and `createJiti` call (44) install no filesystem sandbox.
 
 ## Capabilities and evidence
 
@@ -53,7 +56,7 @@ against the real published declarations. Host Zod is `4.6.7`, jiti `2.6.1`.
 | Automatic rollover | `createTask` prepares, but does not initialize; wrappers call create/run directly [P]. Native create-and-run explicitly calls private `init()` [F]; public context exposes `isInitialized()`, not `init()` [T]. | Absent: unsafe/unestablished automatic path removed. Fresh-task missing-init behavior was not live-tested; no workaround/private import. Manual UI-created continuation remains unverified. |
 | UI | Creation accepts `activate`; parent linkage inherits source settings/worktree [P]. Renderer UI components separately expose `activateTask`, not a main-context select method [T]. | Adapter never creates/activates a task. User creates/opens a fresh task normally; no setting/model-preservation promise. |
 | Native subagents | `runSubagent` shares its task, adds per-run prompt context, sends `SubagentStarted` and mutable `SubagentFinished.resultMessages` back to the caller [K,E]. Profile identity is not an independent task id. | Excluded: no child-specific storage/measurement/parent delivery port. Native result flow source-established only. |
-| Storage | No extension KV contract found. `getTaskDir()` gives shared project/worktree working directory [T,F]; vector Memory API is optional and not exact KV. | Dedicated sha256(taskId) file scopes, verbatim first-writer storage, cross-instance/reload/shared-directory fixtures. No quota/TTL/eviction, task-deletion cleanup, same-user sandbox or fsync promise. |
+| Storage | No extension KV contract found. Extensions run in the host main process with unrestricted Node filesystem access: the assessed loader uses plain jiti with no fs sandbox [L], the creating-extensions guide shows `readFileSync`/`axios` use [I], and the bundled verifier reads/writes its own folder via `node:fs` [V]. | Private `~/.aiderdesk/auto-context-handover/<sha256(projectId + '\0' + taskId)>` files scope, verbatim first-writer storage, cross-instance/reload/shared-directory/project-isolation fixtures. No quota/TTL/eviction, task-deletion cleanup, same-user sandbox or fsync promise. |
 | Installation/build | Global/project extension dirs, TypeScript class default export; jiti loads directly with host Zod alias [I,L]. | Real forwarding-entry loader check passes. Bare folder copy loses shared imports. Directory symlink is skipped by discovery and direct loading also failed relative-import resolution. |
 | Native handoff/compaction | `PromptTemplateEvent` can override prompt text, but native handoff and compaction call separate auxiliary generation, even when defaulting to the task's model [K,I]. | Not reused: same model identifier is not the active session writing its handover. No prompt override/settings changes; native strategies may still run independently. |
 | Headless validation | Desktop app is Electron; contracts also recognize Node/headless operation (`getElectronApp()` may return null) [T]. The loader itself does not require Electron [L]. | Actual pinned loader checked with only logger stubbed and module-resolution aliases. Full desktop/server lifecycle and model requests were not exercised. |
@@ -69,10 +72,13 @@ Checklist: [all twelve requirements](../adapters.md#aiderdesk-root-agent-task-mv
   and supplies the returned reader-reference prompt. It identifies the source
   task and shared no-repeat/evidence/title framing; readback includes the full
   text once. Keep the source loaded and its working directory available.
-- Storage is `<working-directory>/.auto-context-handover/<sha256(taskId)>/handover.json`.
-  Files survive extension reload/compaction, but there is no task-deletion
-  cleanup, quota, TTL or eviction. Retention is manual; moving/removing a
-  worktree may lose readback. New directories/files use 0700/0600, not a
+- Storage is `~/.aiderdesk/auto-context-handover/<sha256(projectId + '\0' + taskId)>/handover.json`.
+  Identity is host project `baseDir`, then `getProjectDir()`, then task
+  `getTaskDir()` if earlier sources are unavailable. Files survive extension
+  reload/compaction, worktree moves and removals, but changed project identity
+  prevents normal readback. There is no task-deletion cleanup, quota, TTL or
+  eviction. Retention is manual; nothing is written inside the project working directory.
+  New directories/files use 0700/0600, not a
   same-user sandbox. Publication is not fsync durability; interrupted writes
   may leave temporary files. No original-task capture, context-file copying,
   requested-override observation, parent-only reader or arbitrary-path reader.
@@ -86,7 +92,7 @@ Checklist: [all twelve requirements](../adapters.md#aiderdesk-root-agent-task-mv
   deliberately absent, including its attempt/outcome files and prompt hook.
 - Rejected approaches: read/check/rename first-writer publication (racy),
   treating `getTaskDir()` as task-private (cross-task collisions), and automatic
-  create/run on uninitialized tasks. Current atomic publication and same-directory
+  create/run on uninitialized tasks. Current atomic publication and project-scoped
   different-id fixtures address storage. Symlink loading passed plain Node but
   failed real discovery/loader resolution; use a real forwarding entry instead.
 
@@ -142,7 +148,7 @@ lists install/list/help; real pinned loader returned `Auto Context Handover`,
 the full extension manager/app was not started. No Electron binary or full
 headless server was needed for this scoped check.
 
-Repository verification: `node --test "aiderdesk/**/*.test.ts"` (27 passed),
+Repository verification: `node --test "aiderdesk/**/*.test.ts"` (29 passed),
 `npm run typecheck` (seven projects), `npm test` (570 passed), and isolated
 `claude plugin validate .` (passed with existing author/icon warnings).
 Fixtures/loader checks do not establish actual approvals, manual continuation,

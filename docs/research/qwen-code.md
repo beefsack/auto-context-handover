@@ -1,7 +1,7 @@
 # Qwen Code adapter assessment
 
-Status (2026-10-29): **subagent-first MVP; pinned source contract**.
-Target `@qwen-code/qwen-code@0.26.3`, tag `v0.26.3` / commit
+Status (2026-10-29): **subagent-first MVP; assessed source contract**.
+Assessed `@qwen-code/qwen-code@0.26.3`, tag `v0.26.3` / commit
 `eeee1443a7e36ab22b2f1dcded8dec64b621a7ee`. Roots receive continuation
 context and read access only. Installation/MCP connection were observed without
 a model; fixtures never establish model compliance or parent receipt.
@@ -44,7 +44,7 @@ package's bundled JavaScript. Observed means non-model CLI/protocol behavior onl
 
 ## Implementation boundaries and review
 
-- Positive integer soft only, default `150000`, uncapped because child window
+- Positive integer soft only, default `200000`, uncapped because child window
   attribution is unestablished. Shared soft/1.1/1.2 stages at PostToolUse only;
   no hard token gate. Invalid configuration disables notices, keeps binding,
   stores internal soft `0`, and reads unknown threshold/stage/estimate.
@@ -78,7 +78,10 @@ package's bundled JavaScript. Observed means non-model CLI/protocol behavior onl
 ## Non-model verification
 
 With required `ISO` (isolated state) and `REPO` (intact checkout) absolute paths,
-run outside the checkout; no credentials or model selection are needed:
+run outside the checkout; no credentials or model selection are needed.
+Commands below target latest per current policy; recorded observations remain
+evidence of the exact assessed versions above, not re-verification against
+current releases:
 
 ```sh
 : "${ISO:?}" "${REPO:?}"
@@ -87,7 +90,7 @@ cd "$ISO"
 export HOME="$ISO/home" XDG_CONFIG_HOME="$ISO/config"
 export XDG_CACHE_HOME="$ISO/cache" XDG_DATA_HOME="$ISO/data"
 export npm_config_cache="$ISO/npm-cache"
-npm install --prefix "$ISO/host" @qwen-code/qwen-code@0.26.3
+npm install --prefix "$ISO/host" @qwen-code/qwen-code@latest
 node "$ISO/host/node_modules/@qwen-code/qwen-code/cli.js" --version
 node "$ISO/host/node_modules/@qwen-code/qwen-code/cli.js" extensions link "$REPO/qwen"
 node "$ISO/host/node_modules/@qwen-code/qwen-code/cli.js" extensions list

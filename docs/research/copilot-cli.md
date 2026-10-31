@@ -40,7 +40,9 @@ Actual host callback routing, model compliance and parent receipt are **unverifi
 
 ## Non-model checks
 
-Use an isolated directory, not an existing Copilot home:
+Use an isolated directory, not an existing Copilot home. Commands below target
+latest per current policy; recorded observations remain evidence of the exact
+assessed versions above, not re-verification against current releases:
 
 ```sh
 : "${ISO:?Set ISO to an isolated directory}"
@@ -51,14 +53,14 @@ export XDG_DATA_HOME="$ISO/xdg-data" XDG_STATE_HOME="$ISO/xdg-state"
 export NPM_CONFIG_CACHE="$ISO/npm-cache"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
 npm view @github/copilot version dist-tags
-npx --yes @github/copilot@1.0.105 --version
-npx --yes @github/copilot@1.0.105 --help
-npx --yes @github/copilot@1.0.105 plugin --help
-npx --yes @github/copilot@1.0.105 help config
-npx --yes @github/copilot@1.0.105 help limits
-npx --yes @github/copilot@1.0.105 plugin install "$ROOT/copilot"
-npx --yes @github/copilot@1.0.105 plugin list --json
-npx --yes @github/copilot@1.0.105 mcp list
+npx --yes @github/copilot@latest --version
+npx --yes @github/copilot@latest --help
+npx --yes @github/copilot@latest plugin --help
+npx --yes @github/copilot@latest help config
+npx --yes @github/copilot@latest help limits
+npx --yes @github/copilot@latest plugin install "$ROOT/copilot"
+npx --yes @github/copilot@latest plugin list --json
+npx --yes @github/copilot@latest mcp list
 ```
 
 All exited 0. Version 1.0.105; standalone plugin enabled at 0.1.0; no MCP

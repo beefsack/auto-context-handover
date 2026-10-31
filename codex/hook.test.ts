@@ -64,9 +64,9 @@ function postTool(childId: string, toolName = "shell"): Record<string, unknown> 
 }
 
 describe("config", () => {
-  it("defaults to 150000 and accepts positive integers", () => {
+  it("defaults to 200000 and accepts positive integers", () => {
     assert.equal(resolveSoft({}), DEFAULT_SOFT);
-    assert.equal(DEFAULT_SOFT, 150000);
+    assert.equal(DEFAULT_SOFT, 200000);
     assert.equal(resolveSoft({ [SOFT_ENV]: "200000" }), 200000);
   });
 

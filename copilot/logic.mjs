@@ -3,8 +3,8 @@
 // ../source resolving, so shared wording/logic is embedded here and
 // drift-checked by logic.test.ts against ../source/shared/*.
 //
-// Scope (contract-backed, see the @github/copilot-sdk 1.0.28 devDependency
-// types, byte-identical to the bundled CLI 1.0.105 SDK contracts):
+// Scope (contract-backed, see the @github/copilot-sdk ^1 devDependency
+// types, assessed against 1.0.28, byte-identical to the bundled CLI 1.0.105 SDK contracts):
 // - Identity: ToolInvocation.agentId (present = attributed child call).
 //   Absent agentId can mean a root call OR a child call the runtime did not
 //   attribute, so unattributed handover calls are refused without claiming
@@ -100,7 +100,7 @@ export const TOOL_NAMES = {
 export const SOFT_ENV_VAR = "AUTO_CONTEXT_HANDOVER_SOFT";
 export const DATA_ENV_VAR = "AUTO_CONTEXT_HANDOVER_DATA";
 export const DATA_DIR_NAME = "auto-context-handover";
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 
 export const CHILD_SUMMARY_PREFIX = "Context handover (incomplete):";
 

@@ -146,8 +146,8 @@ describe("shared drift", () => {
   });
 
   it("soft resolution and staging mirror shared helpers", () => {
-    assert.equal(resolveSoftForWindow({}, 200000), sharedResolveSoftTokens(sharedParseThreshold(150000), 200000));
-    assert.equal(resolveSoftForWindow({}, undefined), sharedResolveSoftTokens(sharedParseThreshold(150000), undefined));
+    assert.equal(resolveSoftForWindow({}, 200000), sharedResolveSoftTokens(sharedParseThreshold(200000), 200000));
+    assert.equal(resolveSoftForWindow({}, undefined), sharedResolveSoftTokens(sharedParseThreshold(200000), undefined));
     assert.equal(
       resolveSoftForWindow({ [SOFT_ENV]: "50%" }, 200000),
       sharedResolveSoftTokens(sharedParseThreshold("50%"), 200000),
@@ -179,9 +179,9 @@ describe("shared drift", () => {
     }
   });
 
-  it("default soft is 150000 like the other adapters", () => {
-    assert.equal(DEFAULT_SOFT, 150000);
-    assert.deepEqual(resolveSoftSpec({}), sharedParseThreshold(150000));
+  it("default soft is 200000 like the other adapters", () => {
+    assert.equal(DEFAULT_SOFT, 200000);
+    assert.deepEqual(resolveSoftSpec({}), sharedParseThreshold(200000));
   });
 });
 
@@ -434,15 +434,15 @@ describe("hooks", () => {
     const memory = freshMemory();
     const input = (agentId: string): never => ({ agentId, toolName: "bash", toolArgs: {}, toolResult: {}, ...hookBase(agentId) }) as never;
     assert.equal(handlePostToolUse(input("child-1"), store, memory, {}), undefined);
-    handleUsageInfo(usageEvent("child-1", 149999, 300000), store, memory, {});
+    handleUsageInfo(usageEvent("child-1", 199999, 300000), store, memory, {});
     assert.equal(handlePostToolUse(input("child-1"), store, memory, {}), undefined);
-    handleUsageInfo(usageEvent("child-1", 150000, 300000), store, memory, {});
+    handleUsageInfo(usageEvent("child-1", 200000, 300000), store, memory, {});
     const notice = handlePostToolUse(input("child-1"), store, memory, {});
     assert.match(notice?.additionalContext ?? "", /Context is filling/);
     assert.equal(memory.getObservation("child-1")?.nudged, true);
-    handleUsageInfo(usageEvent("child-1", 165000, 300000), store, memory, {});
+    handleUsageInfo(usageEvent("child-1", 220001, 300000), store, memory, {});
     assert.match(handlePostToolUse(input("child-1"), store, memory, {})?.additionalContext ?? "", /Wrap up now/);
-    handleUsageInfo(usageEvent("child-1", 180000, 300000), store, memory, {});
+    handleUsageInfo(usageEvent("child-1", 240001, 300000), store, memory, {});
     assert.match(handlePostToolUse(input("child-1"), store, memory, {})?.additionalContext ?? "", /final warning/);
   });
 

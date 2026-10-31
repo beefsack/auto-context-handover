@@ -20,7 +20,7 @@ const HANDOVER_TAIL = `Do not paste secrets. What happens next depends on this s
 const HANDOVER_CHILD_DEFAULT =
   `Child continuation default: this is a context rollover, not task completion. ` +
   `Child summaries must start with ${JSON.stringify(CHILD_SUMMARY_PREFIX)}. ` +
-  `The parent normally continues in a same-agent-type successor, which continues and replaces the predecessor as the same logical subagent, not an additional subagent under subagent-count limits, ` +
+  `The parent normally continues in a same-agent-type successor using the same model and variant/effort (reuse the original spawn parameters including effort if unavailable), which continues and replaces the predecessor as the same logical subagent, not an additional subagent under subagent-count limits, ` +
   `spawned with a prompt instructing it to call read_handover with the predecessor sessionID and continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
   `${SEED_FRAMING} ` +
   `Redirection remains allowed. ` +
@@ -82,9 +82,15 @@ export function buildLockedChildDirective(reason: string, sessionID: string): st
   )
 }
 
-export function buildSuccessorSeed(handover: string, sourceSessionID: string): string {
+export function buildSuccessorSeed(
+  handover: string,
+  sourceSessionID: string,
+  model: { providerID: string; id: string; variant?: string } = { providerID: "unknown", id: "unknown" },
+): string {
   return (
     `Continuing work handed over from session ${sourceSessionID}. ` +
+    `Effective model: ${model.providerID}/${model.id}; variant/effort=${model.variant ?? "unknown"}. ` +
+    `Reuse this model and variant/effort for the successor; if unknown, reuse the predecessor's original spawn parameters including effort. ` +
     `${SEED_FRAMING} ` +
     `If anything below is unclear, read the full stored handover with the read_handover tool for session ${sourceSessionID}.\n\n` +
     `--- handover from session ${sourceSessionID} ---\n${handover}\n--- end of handover ---`
@@ -103,10 +109,15 @@ export function buildLockModeNotice(sessionID: string, reason: string): string {
   )
 }
 
-export function buildSubagentReturn(summary: string, sessionID: string): string {
+export function buildSubagentReturn(
+  summary: string,
+  sessionID: string,
+  model: { providerID: string; id: string; variant?: string } = { providerID: "unknown", id: "unknown" },
+): string {
   const continuation = buildChildContinuationReply(
     withChildSummaryPrefix(summary),
     `read the full handover with read_handover({"sessionID":${JSON.stringify(sessionID)}})`,
+    `${model.providerID}/${model.id}; variant/effort=${model.variant ?? "unknown"}`,
   )
   return (
     `Handover stored; end your turn now with exactly the following text as your final message and then stop.\n\n${continuation}`

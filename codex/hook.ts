@@ -21,7 +21,7 @@ import {
 
 export { TOOL_NAMES, successorPrompt };
 
-export const DEFAULT_SOFT = 150000;
+export const DEFAULT_SOFT = 200000;
 export const SOFT_ENV_VAR = "AUTO_CONTEXT_HANDOVER_SOFT";
 
 export class ConfigError extends Error {

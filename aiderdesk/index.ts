@@ -1,17 +1,17 @@
 // auto-context-handover: AiderDesk root agent-task adapter (no build step).
 // Root agent runs only: measured soft-limit advisories and a model-written
-// handover persisted to dedicated plugin storage in the project/worktree.
-// Storage only: no automatic successor, no lock/tool gate, no native
+// handover persisted to private HOME plugin storage. Storage only: no
+// automatic successor, no lock/tool gate, no native
 // handoff/compact calls, no config changes. Manual continuation only: the
 // user creates/opens a new task through the normal AiderDesk UI and prompts
 // it with the reader reference from read-handover.
 //
-// Persistence: <taskDir>/.auto-context-handover/<sha256(taskId)>/handover.json
+// Persistence: ~/.aiderdesk/auto-context-handover/<sha256(projectId + '\0' + taskId)>/handover.json
 // holds the verbatim handover (first writer wins, never overwritten). The
-// hash scope is required because the host task directory is the shared
-// project/worktree directory. Survives extension reload; in-memory
+// project-scoped hash is required because task ids alone are not trusted to
+// be unique across projects. Survives extension reload; in-memory
 // diagnostics do not, so tool calls after a reload honestly report unknown
-// diagnostics.
+// diagnostics. Nothing is written inside the project working directory.
 //
 // Installation shape: this folder is a folder-based AiderDesk extension.
 // The id "aiderdesk" comes from the folder name; the host exposes the tools
@@ -21,6 +21,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 // The host aliases zod, so this bare specifier resolves to the bundled copy.
 import { z } from "zod";
@@ -56,9 +57,10 @@ export const FULL_TOOL_NAME = `${EXTENSION_ID}${TOOL_SEPARATOR}${TOOL_NAME}`;
 export const FULL_READ_TOOL_NAME = `${EXTENSION_ID}${TOOL_SEPARATOR}${READ_TOOL_NAME}`;
 
 const ENV_SOFT = "AUTO_CONTEXT_HANDOVER_SOFT";
-const DEFAULT_SOFT = 150000;
+const DEFAULT_SOFT = 200000;
 
-const SUBDIR = ".auto-context-handover";
+const SUBDIR = "auto-context-handover";
+const STORAGE_DIRNAME = ".aiderdesk";
 const HANDOVER_FILE = "handover.json";
 
 type DiagValue = number | "unknown";
@@ -121,7 +123,7 @@ const TOOL_DESCRIPTION =
   `Pass the FULL handover text VERBATIM in "handover" (it is stored and replayed word for word, never summarized or reworded) ` +
   `plus a short status/outcome/next-step summary in "summary".\n\n` +
   `${AIDERDESK_HANDOVER_SECTIONS}\n\n` +
-  `Storage only: the text is kept in dedicated plugin storage in the project/worktree for manual continuation. ` +
+  `Storage only: the text is kept in private HOME plugin storage (~/.aiderdesk/auto-context-handover) for manual continuation. ` +
   `Once stored, end your turn without starting new work; there is no automatic successor and no lock. ` +
   `If a handover is already stored for this task the call is refused and the original is kept, never overwritten. ` +
   `Do not paste secrets.`;
@@ -137,7 +139,7 @@ const INTRO_TEXT =
   `Soft-limit advisories may follow; each advisory applies to the current step only: ` +
   `it replaces any required final report or current-step wrap-up instruction for that step, not the whole task. ` +
   `When an advisory appears, finish the current step, then call the context-handover tool with the full handover text; ` +
-  `the tool writes only dedicated plugin storage in the project/worktree, so read-only task instructions still allow the call. ` +
+  `the tool writes only private HOME plugin storage, so read-only task instructions still allow the call. ` +
   `After the handover is stored, end your turn; there is no automatic successor and no lock. ` +
   `To continue, the user creates/opens a new task through the normal AiderDesk UI and prompts it with the read-handover reference. ` +
   `Nothing continues until the handover is stored.`;
@@ -148,7 +150,7 @@ const NOTICE_SUFFIX =
   ` This advisory applies to the current step only: it replaces any required final report or current-step wrap-up for this step, ` +
   `not the whole task (see the auto-context-handover intro message for the full workflow). ` +
   `When done with this step, call the context-handover tool with the full handover text ` +
-  `(dedicated plugin storage write only, allowed under read-only instructions); after storing, end your turn. ` +
+  `(private HOME plugin storage write only, allowed under read-only instructions); after storing, end your turn. ` +
   `There is no automatic successor and no lock.`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -177,17 +179,51 @@ function softSpecFromEnv(raw: string | undefined): { readonly spec?: ThresholdSp
   }
 }
 
-// Real-host TaskContext.getTaskDir is the shared project/worktree working
-// directory, not a per-task directory. Scope every record under a private
-// per-task-id hash subdirectory so different tasks sharing one directory
-// never collide. The raw id is never used as a path segment.
-function taskScopeDir(taskDir: string, taskId: string): string {
-  const hash = createHash("sha256").update(taskId, "utf8").digest("hex");
-  return join(taskDir, SUBDIR, hash);
+// Private HOME storage. Extensions run in the host main process with
+// unrestricted Node filesystem access (pinned loader uses plain jiti with no
+// fs sandbox; the bundled verifier reads/writes its own folder via node:fs),
+// so handovers live outside the project working directory. Scope every
+// record under a hash of the host-resolved project identity plus the task id
+// so identical task ids in different projects never collide. The raw ids are
+// never used as path segments.
+function storageRoot(): string {
+  return join(homedir(), STORAGE_DIRNAME, SUBDIR);
 }
 
-function handoverFile(taskDir: string, taskId: string): string {
-  return join(taskScopeDir(taskDir, taskId), HANDOVER_FILE);
+function scopeHash(projectId: string, taskId: string): string {
+  return createHash("sha256").update(projectId, "utf8").update("\0", "utf8").update(taskId, "utf8").digest("hex");
+}
+
+function handoverFile(projectId: string, taskId: string): string {
+  return join(storageRoot(), scopeHash(projectId, taskId), HANDOVER_FILE);
+}
+
+// Host-resolved project identity for storage scoping: the project context
+// baseDir when available, else the extension project dir, else the task
+// working directory as a last resort. Empty means unresolvable.
+function projectIdentity(
+  context: ExtensionContext,
+  task: { getTaskDir?: () => string } | null,
+): string {
+  try {
+    const project = context.getProjectContext() as { baseDir?: unknown } | null;
+    if (project && typeof project.baseDir === "string" && project.baseDir) return project.baseDir;
+  } catch {
+    // Fall through to the next source.
+  }
+  try {
+    const dir = (context as { getProjectDir?: () => unknown }).getProjectDir?.();
+    if (typeof dir === "string" && dir) return dir;
+  } catch {
+    // Fall through to the next source.
+  }
+  try {
+    const taskDir = task?.getTaskDir?.();
+    if (typeof taskDir === "string" && taskDir) return taskDir;
+  } catch {
+    // Unresolvable.
+  }
+  return "";
 }
 
 /**
@@ -328,9 +364,9 @@ export default class AutoContextHandoverExtension implements Extension {
           throw new Error(`auto-context-handover: no task context for the handover call, refusing to act`);
         }
         const taskId = task.data.id;
-        const taskDir = task.getTaskDir();
-        if (!taskDir) {
-          throw new Error(`auto-context-handover: no task directory for task ${taskId}, refusing to act`);
+        const projectId = projectIdentity(context, task);
+        if (!projectId) {
+          throw new Error(`auto-context-handover: no project identity for task ${taskId}, refusing to act`);
         }
         const observed = this.diagByTask.get(taskId);
         const identity = this.agentByTask.get(taskId);
@@ -352,7 +388,7 @@ export default class AutoContextHandoverExtension implements Extension {
         };
         let published: "created" | "exists";
         try {
-          published = await publishImmutableFirstWins(handoverFile(taskDir, taskId), JSON.stringify(payload));
+          published = await publishImmutableFirstWins(handoverFile(projectId, taskId), JSON.stringify(payload));
         } catch (error) {
           throw new Error(
             `auto-context-handover: failed to store handover, nothing was handed over: ${(error as Error).message}`,
@@ -380,7 +416,7 @@ export default class AutoContextHandoverExtension implements Extension {
       inputSchema: readSchema,
       execute: async (input: ReadInput, _signal: AbortSignal | undefined, context: ExtensionContext) => {
         const taskId = typeof input.taskId === "string" && input.taskId.trim().length > 0 ? input.taskId.trim() : undefined;
-        let taskDir: string;
+        let projectId: string;
         let resolvedId: string;
         if (taskId !== undefined) {
           let project;
@@ -397,20 +433,21 @@ export default class AutoContextHandoverExtension implements Extension {
               `auto-context-handover: task ${taskId} is not loaded in the current project, refusing to read arbitrary state`,
             );
           }
-          taskDir = target.getTaskDir();
+          const baseDir = (project as { baseDir?: unknown }).baseDir;
+          projectId = typeof baseDir === "string" && baseDir ? baseDir : projectIdentity(context, target);
           resolvedId = target.data.id;
         } else {
           const task = context.getTaskContext();
           if (!task) {
             throw new Error(`auto-context-handover: no task context for the read call, refusing to act`);
           }
-          taskDir = task.getTaskDir();
+          projectId = projectIdentity(context, task);
           resolvedId = task.data.id;
         }
-        if (!taskDir) {
-          throw new Error(`auto-context-handover: no task directory for task ${resolvedId}, refusing to act`);
+        if (!projectId) {
+          throw new Error(`auto-context-handover: no project identity for task ${resolvedId}, refusing to act`);
         }
-        const read = await readJsonFile(handoverFile(taskDir, resolvedId)).catch((error: unknown) => {
+        const read = await readJsonFile(handoverFile(projectId, resolvedId)).catch((error: unknown) => {
           throw new Error(
             `auto-context-handover: cannot read the stored handover for task ${resolvedId}: ${(error as Error).message}`,
           );
@@ -422,7 +459,7 @@ export default class AutoContextHandoverExtension implements Extension {
         if (!stored) {
           return (
             `The latest stored handover entry for task ${resolvedId} is invalid; refusing to fall back to anything older. ` +
-            `The immutable entry cannot be replaced by another tool call; inspect the task handover file for recovery.`
+            `The immutable entry cannot be replaced by another tool call; inspect the stored handover file for recovery.`
           );
         }
         const header = `Handover from task ${stored.sourceTaskId} (model ${stored.provider}/${stored.model}):`;

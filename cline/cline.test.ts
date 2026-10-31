@@ -220,7 +220,7 @@ describe("cline plugin registration", () => {
 describe("parseClineSoftEnv", () => {
   it("defaults when unset and accepts positive integers", () => {
     assert.equal(parseClineSoftEnv(undefined).soft, DEFAULT_SOFT);
-    assert.equal(DEFAULT_SOFT, 150000);
+    assert.equal(DEFAULT_SOFT, 200000);
     assert.equal(parseClineSoftEnv("200000").soft, 200000);
     assert.equal(parseClineSoftEnv("  42 ").soft, 42);
   });
@@ -344,7 +344,7 @@ describe("estimator and advisories", () => {
     try {
       const harness = setupHarness({ env: {} });
       assert.equal(harness.errors.length, 0);
-      const huge = req({ messages: [{ role: "user", content: [{ type: "text", text: bigText(700000) }] }] });
+      const huge = req({ messages: [{ role: "user", content: [{ type: "text", text: bigText(900000) }] }] });
       assert.ok(harness.beforeModel({ snapshot: rootSnap(), request: huge }));
     } finally {
       if (saved === undefined) delete process.env[ENV_SOFT];

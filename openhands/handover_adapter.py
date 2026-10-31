@@ -157,7 +157,7 @@ def resolve_soft_tokens(spec: dict[str, Any], window: int | None) -> int | None:
 
 
 STORE_DIRNAME = "auto-context-handover"
-DEFAULT_SOFT_TOKENS = 150000
+DEFAULT_SOFT_TOKENS = 200000
 ENV_SOFT_VAR = "AUTO_CONTEXT_HANDOVER_SOFT"
 
 

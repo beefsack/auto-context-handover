@@ -49,7 +49,7 @@ observed = isolated non-model command, not a model session.
   read any retained id, including from children; no parent-only policy.
 - Explicit `AUTO_CONTEXT_HANDOVER_GOOSE_STOP=1` enables Stop denials, otherwise
   storage remains available for explicit requests. Integer-only soft defaults
-  to 150000 uncapped (window unknown). Shared stages soft/1.1/1.2. Invalid soft
+  to 200000 uncapped (window unknown). Shared stages soft/1.1/1.2. Invalid soft
   logs/disables notices, not tools; writer omits unavailable soft/stage.
 - Native export includes conversation, but only usage/root/model fields are
   used. A 15-second/16-MiB subprocess bound may make large sessions unknown:

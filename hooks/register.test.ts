@@ -1712,6 +1712,8 @@ describe("agent.spawn provenance", () => {
     const read = await toolCall(fake, { tool: READ_FULL, tool_use_id: "r1", childId: "c1" })
     assert.match(String(read.result), /same agent type \(recorded: Explore\)/)
     assert.match(String(read.result), /same model override \(recorded: opus\)/)
+    assert.match(String(read.result), /variant\/effort=unknown/)
+    assert.match(String(read.result), /Reuse the original spawn parameters, including effort/)
   })
 
   it("distinguishes observed no override from unknown and ignores forks", async () => {
@@ -1722,7 +1724,7 @@ describe("agent.spawn provenance", () => {
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c2", handover: "b", summary: "s" })
     const c2 = fake.store.get("child:c2") as ChildRecord
     assert.match(shortReplyOf(c2, c2), /\(recorded: no override\)/)
-    assert.ok(!shortReplyOf(c2, c2).includes("unknown"))
+    assert.ok(!shortReplyOf(c2, c2).includes("model override (recorded: unknown"))
     await spawn(fake, { subagentType: "Plan", model: "opus", fork: true }, { model: "parent-model", agentId: "c3" })
     await toolCall(fake, { tool: HANDOVER_FULL, tool_use_id: "t2", agentId: "c3", handover: "b", summary: "s" })
     assert.match(shortReplyOf(fake.store.get("child:c3") as ChildRecord, fake.store.get("child:c3") as ChildRecord), /\(recorded: no override\)/)
@@ -1732,6 +1734,67 @@ describe("agent.spawn provenance", () => {
     reload.agents = [{ id: "c4", type: "general-purpose", status: "running" }]
     await toolCall(reload, { tool: HANDOVER_FULL, tool_use_id: "t1", agentId: "c4", handover: "b", summary: "s" })
     assert.match(shortReplyOf(reload.store.get("child:c4") as ChildRecord), /\(recorded: unknown, use predecessor spawn params\)/)
+  })
+
+  it("records request effort separately from spawn overrides and retains it after reload", async () => {
+    for (const effort of ["high", "xhigh", 42, 0]) {
+      const fake = makeFake()
+      setup(fake)
+      fake.agents = childAgents("c1")
+      await spawn(fake, { subagentType: "Explore", model: "opus" }, { agentId: "c1" })
+      await runStep(fake, { agentId: "c1", turnId: "turn1", effort }, null)
+      const done = await toolCall(fake, { tool: HANDOVER_FULL, agentId: "c1", handover: "body", summary: "s" })
+      assert.ok(String(done.result).includes(`variant/effort=${effort}`))
+      const stored = fake.store.get("child:c1") as ChildRecord
+      assert.equal(stored.effort, effort)
+      assert.equal(stored.modelOverride, "opus")
+      assert.equal((fake.store.get("spawn:c1") as SpawnProvenance).effort, undefined)
+      assert.ok(buildClaudeSuccessorSeed("c1", "body", stored).includes(`variant/effort=${effort}`))
+
+      const reloaded = makeFake()
+      for (const [key, value] of fake.store) reloaded.store.set(key, value)
+      reloaded.agents = fake.agents
+      setup(reloaded)
+      const read = await toolCall(reloaded, { tool: READ_FULL, childId: "c1" })
+      assert.ok(String(read.result).includes(`variant/effort=${effort}`))
+      const locked = await toolCall(reloaded, { tool: "Bash", agentId: "c1" })
+      assert.ok(String(locked.deny).includes(`variant/effort=${effort}`))
+    }
+  })
+
+  it("clears absent request effort and never inherits predecessor effort or infers it from usage", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = [...childAgents("c1"), ...childAgents("c2")]
+    const usage = { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: "model-high" }
+    await runStep(fake, { agentId: "c1", turnId: "turn1", effort: "high" }, usage)
+    await toolCall(fake, { tool: HANDOVER_FULL, agentId: "c1", handover: "body", summary: "s" })
+    await spawn(fake, { prompt: `${buildSuccessorMarker("c1")} continue` }, { agentId: "c2" })
+    await runStep(fake, { agentId: "c2", turnId: "turn2", effort: "xhigh" }, usage)
+    await runStep(fake, { agentId: "c2", turnId: "turn2", index: 1 }, usage)
+    const done = await toolCall(fake, { tool: HANDOVER_FULL, agentId: "c2", handover: "body", summary: "s" })
+    assert.match(String(done.result), /variant\/effort=unknown/)
+    assert.equal((fake.store.get("child:c2") as ChildRecord).effort, undefined)
+    const read = await toolCall(fake, { tool: READ_FULL, childId: "c2" })
+    assert.match(String(read.result), /variant\/effort=unknown/)
+  })
+
+  it("observes effort before a handover tool runs inside the request", async () => {
+    const fake = makeFake()
+    setup(fake)
+    fake.agents = childAgents("c1")
+    const hook = only(fake, "turn.step") as unknown as (
+      $: Engine,
+      event: Record<string, unknown>,
+      next: () => AsyncGenerator<unknown, StepResult, StepResult | undefined>,
+    ) => AsyncGenerator<unknown, StepResult, StepResult | undefined>
+    async function* next(): AsyncGenerator<unknown, StepResult, StepResult | undefined> {
+      const done = await toolCall(fake, { tool: HANDOVER_FULL, agentId: "c1", handover: "body", summary: "s" })
+      assert.match(String(done.result), /variant\/effort=high/)
+      return { usage: null }
+    }
+    for await (const _chunk of hook(fake.$, { agentId: "c1", turnId: "turn1", effort: "high" }, next)) { /* drain */ }
+    assert.equal((fake.store.get("child:c1") as ChildRecord).effort, "high")
   })
 
   it("handles denied/malformed spawns, teammates, and legacy records without enabling handovers", async () => {
@@ -1751,6 +1814,7 @@ describe("agent.spawn provenance", () => {
     legacy.agents = childAgents("old")
     assert.match(String((await toolCall(legacy, { tool: "Bash", tool_use_id: "t1", agentId: "old" })).deny), /locked after a context handover/)
     assert.match(String((await toolCall(legacy, { tool: READ_FULL, tool_use_id: "r1", childId: "old" })).result), /\(recorded: unknown, use predecessor spawn params\)/)
+    assert.match(String((await toolCall(legacy, { tool: READ_FULL, childId: "old" })).result), /variant\/effort=unknown/)
     // Spawn after closure persists standalone metadata without overwriting the closed handover.
     const after = makeFake()
     setup(after)
@@ -2144,9 +2208,9 @@ describe("handback delivery contract", () => {
 
   it("formats seed provenance as clean labels for known, absent, and unknown overrides", () => {
     const cases = [
-      { provenance: { agentType: "Explore", modelOverride: "opus" }, expected: "agent type: Explore; model override: opus" },
-      { provenance: { agentType: "Explore", modelOverride: null }, expected: "agent type: Explore; model override: no override" },
-      { provenance: undefined, expected: "agent type: unknown - use predecessor spawn params; model override: unknown - use predecessor spawn params" },
+      { provenance: { agentType: "Explore", modelOverride: "opus" }, expected: "agent type: Explore; model override: opus; variant/effort=unknown" },
+      { provenance: { agentType: "Explore", modelOverride: null }, expected: "agent type: Explore; model override: no override; variant/effort=unknown" },
+      { provenance: undefined, expected: "agent type: unknown - use predecessor spawn params; model override: unknown - use predecessor spawn params; variant/effort=unknown" },
     ]
     for (const { provenance, expected } of cases) {
       const seed = buildClaudeSuccessorSeed("c1", "body", provenance)

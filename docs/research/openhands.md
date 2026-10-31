@@ -7,15 +7,16 @@ Conversation. No replacement application, driver loop or condenser is shipped.
 Notices occur only on the next user submission; an autonomous run can compact
 before any notice. Fixtures and non-model checks do not establish model behavior.
 
-## Pins and primary sources
+## Assessed versions and primary sources
 
 - CLI `openhands==1.16.0`, source
   [`2963442dacc7cea44e39b7c4e73724295c853465`][C], requires Python `3.12.*` and
   pins SDK/tools `1.21.0`, workspace `1.11.1`. Assessed package is the official
   OpenHands CLI, not the older monolithic runtime.
 - SDK `openhands-sdk==1.21.0`, source
-  `4110929b788604d50d83ec693bc445ef8e0a3d38` (tag `v1.21.0`), pinned in the
-  adapter requirements. [Custom tools][T], [callbacks and construction][L],
+  `4110929b788604d50d83ec693bc445ef8e0a3d38` (tag `v1.21.0`), is the assessed
+  source, not an installation pin. Adapter requirements use `openhands-sdk>=1,<2`.
+  [Custom tools][T], [callbacks and construction][L],
   [hooks][H], [metrics][M], [native condenser][N]. Published current
   [hook documentation][D] also describes newer prompt/agent hooks: those are
   not assumed to exist in the assessed package.
@@ -28,7 +29,7 @@ an isolated non-model check, **unverified** is not a model-behavior claim.
 | Capability | Documented / pinned source | Observed / unverified |
 | --- | --- | --- |
 | Measurement | Main LLM `metrics.token_usages` holds individual response records; separate accumulated totals and per-usage-id conversation ledgers exist [M]. Hook input itself has no usage/transcript fields [H]. | SDK adapter samples latest main-agent prompt + completion, never accumulated/combined or condenser usage. Seeded real Metrics fixtures only; actual provider normalization/freshness unverified. Cache/reasoning detail is not added again. |
-| Window and timing | TokenUsage exposes context_window [M]. User callbacks run before default event persistence and after hook processing [L,H]. | Capped integer default150000, explicit percentages; latest previous-response estimate, excluding new user prompt/later results. No tool-boundary/autonomous-run notice. Native Condensation clears measurement until a new ordinary response record. |
+| Window and timing | TokenUsage exposes context_window [M]. User callbacks run before default event persistence and after hook processing [L,H]. | Capped integer default200000, explicit percentages; latest previous-response estimate, excluding new user prompt/later results. No tool-boundary/autonomous-run notice. Native Condensation clears measurement until a new ordinary response record. |
 | Introduction / injection | AgentContext supports system_message_suffix; UserPromptSubmit additionalContext becomes MessageEvent.extended_content [A,H]. | Existing suffix preserved, staged subprocess context observed via real HookManager; synthetic usage and real send_message path, no model. Priority/compliance unverified. |
 | Tools and identity | ToolDefinition.create and ToolExecutor receive host state/conversation; Agent.tools resolves registered specs [T,A]. | Both direct tools resolve in installed SDK; exact bound object/id checks refuse inherited tools in another conversation, including a same-id clone. Application explicitly chooses scope; no automatic root classifier. No deferred loader. |
 | Denial | PreToolUse exit2 denies; Stop denial continues with feedback; hook result has no input-rewrite contract [H]. | Isolated PreToolUse denial observed. Adapter uses neither denial nor Stop; no hard gate/source lock. Actual native Stop-denial loop unverified. |

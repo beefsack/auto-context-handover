@@ -285,7 +285,7 @@ describe("reader", () => {
 
   it("adds an advisory seed warning only past half the soft limit", async () => {
     const store = freshStore();
-    const big = "x".repeat(300001);
+    const big = "x".repeat(400001);
     const stored = await executeTool("context_handover", { handover: big, summary: "s" }, META, store, readerFor(rootExport()), PINNED, {});
     assert.equal(isError(stored), false);
     const out = await executeTool("read_handover", { sessionID: PINNED }, META, store, readerFor(rootExport()), PINNED, {});

@@ -34,7 +34,7 @@ const ENTRY_TYPE = "auto-context-handover";
 const META_TYPE = "auto-context-handover:seed";
 const INTRO_TYPE = "auto-context-handover:intro";
 
-const DEFAULT_SOFT = 150000;
+const DEFAULT_SOFT = 200000;
 
 type DiagValue = number | "unknown";
 
@@ -204,7 +204,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.registerFlag(FLAG_NAME, {
     description:
-      "Soft context threshold for handover advisories: a positive token integer (capped at 70% of the context window) or a percent like 70% (uncapped). Default 150000.",
+      "Soft context threshold for handover advisories: a positive token integer (capped at 70% of the context window) or a percent like 70% (uncapped). Default 200000.",
     type: "string",
     default: String(DEFAULT_SOFT),
   });

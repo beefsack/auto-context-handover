@@ -1,28 +1,33 @@
 // AiderDesk adapter tests: fake Extension API, real filesystem under
-// os.tmpdir(), no host, no network, no model calls.
+// os.tmpdir() (project dirs) and an isolated HOME per test (storage), no
+// host, no network, no model calls.
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import Extension, { EXTENSION_ID, FULL_READ_TOOL_NAME, FULL_TOOL_NAME } from "./index.ts";
 import { SEED_FRAMING } from "../source/shared/handover-text.ts";
 
 const ENV_SOFT = "AUTO_CONTEXT_HANDOVER_SOFT";
-const SUBDIR = ".auto-context-handover";
 
 let savedEnv: string | undefined;
+let savedHome: string | undefined;
 
 beforeEach(() => {
   savedEnv = process.env[ENV_SOFT];
   delete process.env[ENV_SOFT];
+  savedHome = process.env.HOME;
+  process.env.HOME = mkdtempSync(join(tmpdir(), "ach-aiderdesk-home-"));
 });
 
 afterEach(() => {
   if (savedEnv === undefined) delete process.env[ENV_SOFT];
   else process.env[ENV_SOFT] = savedEnv;
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
 });
 
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "ach-aiderdesk-"));
@@ -94,7 +99,7 @@ function makeCtx(options: { task?: any; project?: any; models?: unknown; modelsT
       const cleanup = setup();
       if (typeof cleanup === "function") calls.cleanups.push(cleanup as () => unknown);
     },
-    getProjectDir: () => "/proj",
+    getProjectDir: () => (options.project?.baseDir as string | undefined) ?? "/proj",
   };
   const ctx = new Proxy(base, {
     get(target, prop) {
@@ -107,10 +112,10 @@ function makeCtx(options: { task?: any; project?: any; models?: unknown; modelsT
   return { ctx, calls };
 }
 
-function makeProject(options: { tasksById?: Record<string, any> } = {}): { project: any; calls: { created: Array<unknown> } } {
+function makeProject(options: { tasksById?: Record<string, any>; baseDir?: string } = {}): { project: any; calls: { created: Array<unknown> } } {
   const calls: { created: Array<unknown> } = { created: [] };
   const project = {
-    baseDir: "/proj",
+    baseDir: options.baseDir ?? "/proj",
     createTask: async (...args: Array<unknown>) => {
       calls.created.push(args);
       throw new Error("createTask must never be called: storage only, no automatic successor");
@@ -129,16 +134,23 @@ const load = async (ctx: any): Promise<Extension> => {
 const toolMap = (ext: Extension, ctx: any, mode = "agent", profile: any = rootProfile()): Map<string, any> =>
   new Map(ext.getTools(ctx, mode, profile).map((tool) => [tool.name, tool]));
 
-const subdirFiles = (dir: string, taskId = "task-1"): Array<string> => {
+const scopeHash = (projectId: string, taskId: string): string =>
+  createHash("sha256").update(projectId, "utf8").update("\0", "utf8").update(taskId, "utf8").digest("hex");
+
+const storageRoot = (): string => join(homedir(), ".aiderdesk", "auto-context-handover");
+
+const subdirFiles = (projectId: string, taskId = "task-1"): Array<string> => {
   try {
-    return readdirSync(join(dir, SUBDIR, createHash("sha256").update(taskId, "utf8").digest("hex"))).sort();
+    return readdirSync(join(storageRoot(), scopeHash(projectId, taskId))).sort();
   } catch {
     return [];
   }
 };
 
-const taskFile = (dir: string, taskId: string, name: string): string =>
-  join(dir, SUBDIR, createHash("sha256").update(taskId, "utf8").digest("hex"), name);
+const taskFile = (projectId: string, taskId: string, name: string): string =>
+  join(storageRoot(), scopeHash(projectId, taskId), name);
+
+const DEFAULT_PROJECT = "/proj";
 
 describe("tool registration", () => {
   it("registers kebab-case tools for root agent runs with exact host full names", async () => {
@@ -186,8 +198,8 @@ describe("tool registration", () => {
 });
 
 describe("thresholds and unknowns", () => {
-  it("defaults to 150000 uncapped with an unknown window", async () => {
-    const { task } = makeTask({ estimate: 150000 });
+  it("defaults to 200000 uncapped with an unknown window", async () => {
+    const { task } = makeTask({ estimate: 200000 });
     const { ctx } = makeCtx({ task, models: [] });
     const ext = await load(ctx);
     const event: any = { mode: "agent", agentProfile: rootProfile(), messages: [{ id: "m", role: "user", content: "x" }] };
@@ -248,7 +260,7 @@ describe("thresholds and unknowns", () => {
   });
 
   it("fails open to unknown when model configs are unavailable or unmatched", async () => {
-    const { task } = makeTask({ id: "t-nomatch", estimate: 150000 });
+    const { task } = makeTask({ id: "t-nomatch", estimate: 200001 });
     const { ctx } = makeCtx({ task, models: [{ providerId: "other", id: "other", maxInputTokens: 10 }] });
     const ext = await load(ctx);
     const hit = await ext.onAgentStepStarted({ mode: "agent", agentProfile: rootProfile(), messages: [] } as any, ctx);
@@ -324,7 +336,7 @@ describe("intro and transient notices", () => {
     );
     const intro = String(result?.contextMessages?.[0]?.content ?? result?.contextMessages?.[1]?.content ?? "");
     assert.match(intro, /no automatic successor/i);
-    assert.match(intro, /dedicated plugin storage/i);
+    assert.match(intro, /private HOME plugin storage/i);
   });
 
   it("skips the intro for subagents and non-agent modes", async () => {
@@ -347,13 +359,13 @@ describe("intro and transient notices", () => {
     assert.equal(await ext.onAgentStepStarted(sub, ctx), undefined);
   });
 
-  it("step notice states dedicated plugin storage and no automatic successor", async () => {
+  it("step notice states private HOME plugin storage and no automatic successor", async () => {
     const { task } = makeTask({ estimate: 200000 });
     const { ctx } = makeCtx({ task, models: [] });
     const ext = await load(ctx);
     const hit = await ext.onAgentStepStarted({ mode: "agent", agentProfile: rootProfile(), messages: [] } as any, ctx);
     const notice = String(hit?.messages?.[hit.messages.length - 1]?.content ?? "");
-    assert.match(notice, /dedicated plugin storage/i);
+    assert.match(notice, /private HOME plugin storage/i);
     assert.match(notice, /no automatic successor/i);
   });
 });
@@ -378,16 +390,17 @@ describe("handover storage", () => {
     );
     assert.match(String(stored), /Handover stored for task task-1/);
     assert.match(String(stored), /no automatic successor/i);
-    assert.deepEqual(subdirFiles(dir), ["handover.json"]);
+    assert.deepEqual(subdirFiles(DEFAULT_PROJECT), ["handover.json"]);
+    assert.deepEqual(readdirSync(dir), []);
     const read = await tools.get("read-handover")!.execute({}, undefined, ctx, {});
     assert.match(String(read), /Handover from task task-1 \(model prov\/mod\):/);
-    assert.match(String(read), /Diagnostics: reason=nudged, stage=warn3, estimated-context-tokens=200000, soft-limit=150000/);
+    assert.match(String(read), /Diagnostics: reason=nudged, stage=warn1, estimated-context-tokens=200000, soft-limit=200000/);
     assert.match(String(read), /Manual continuation only/);
     assert.match(String(read), /read-handover/);
     assert.match(String(read), /task-1/);
     assert.ok(String(read).includes(SEED_FRAMING));
     assert.ok(String(read).endsWith("\n\nbody text"));
-    const raw = JSON.parse(readFileSync(taskFile(dir, "task-1", "handover.json"), "utf8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(taskFile(DEFAULT_PROJECT, "task-1", "handover.json"), "utf8")) as Record<string, unknown>;
     assert.equal(raw.handover, "body text");
     assert.equal(raw.summary, "status summary");
   });
@@ -438,7 +451,7 @@ describe("handover storage", () => {
     const texts = [String(a), String(b)];
     assert.equal(texts.filter((text) => text.includes("Handover stored")).length, 1);
     assert.equal(texts.filter((text) => text.includes("already stored")).length, 1);
-    const raw = JSON.parse(readFileSync(taskFile(dir, "task-1", "handover.json"), "utf8")) as {
+    const raw = JSON.parse(readFileSync(taskFile(DEFAULT_PROJECT, "task-1", "handover.json"), "utf8")) as {
       handover: string;
       summary: string;
     };
@@ -450,7 +463,7 @@ describe("handover storage", () => {
     const readB = String(await toolsB.get("read-handover")!.execute({}, undefined, ctxB, {}));
     assert.ok(readA.endsWith(`\n\n${raw.handover}`));
     assert.ok(readB.endsWith(`\n\n${raw.handover}`));
-    assert.deepEqual(subdirFiles(dir), ["handover.json"]);
+    assert.deepEqual(subdirFiles(DEFAULT_PROJECT), ["handover.json"]);
   });
 
   it("reports missing and invalid entries honestly", async () => {
@@ -460,8 +473,8 @@ describe("handover storage", () => {
     const ext = await load(ctx);
     const tools = toolMap(ext, ctx);
     assert.match(String(await tools.get("read-handover")!.execute({}, undefined, ctx, {})), /No handover stored/);
-    mkdirSync(join(dir, SUBDIR, createHash("sha256").update("task-1", "utf8").digest("hex")), { recursive: true });
-    writeFileSync(taskFile(dir, "task-1", "handover.json"), "{not-json");
+    mkdirSync(join(storageRoot(), scopeHash(DEFAULT_PROJECT, "task-1")), { recursive: true });
+    writeFileSync(taskFile(DEFAULT_PROJECT, "task-1", "handover.json"), "{not-json");
     assert.match(String(await tools.get("read-handover")!.execute({}, undefined, ctx, {})), /invalid/);
   });
 
@@ -469,7 +482,8 @@ describe("handover storage", () => {
     const dir = freshDir();
     const blocker = join(dir, "blocker");
     writeFileSync(blocker, "x");
-    const { task } = makeTask({ id: "io-fail", dir: blocker });
+    process.env.HOME = blocker;
+    const { task } = makeTask({ id: "io-fail", dir });
     const { ctx } = makeCtx({ task, models: [] });
     const ext = await load(ctx);
     const tools = toolMap(ext, ctx);
@@ -535,11 +549,12 @@ describe("handover storage", () => {
     assert.match(readB, /Handover from task task-b/);
     const crossA = String(await tools.get("read-handover")!.execute({ taskId: "task-a" }, undefined, ctxB, {}));
     assert.ok(crossA.endsWith("\n\nalpha-body"));
-    const rawA = JSON.parse(readFileSync(taskFile(dir, "task-a", "handover.json"), "utf8")) as Record<string, unknown>;
-    const rawB = JSON.parse(readFileSync(taskFile(dir, "task-b", "handover.json"), "utf8")) as Record<string, unknown>;
+    const rawA = JSON.parse(readFileSync(taskFile(DEFAULT_PROJECT, "task-a", "handover.json"), "utf8")) as Record<string, unknown>;
+    const rawB = JSON.parse(readFileSync(taskFile(DEFAULT_PROJECT, "task-b", "handover.json"), "utf8")) as Record<string, unknown>;
     assert.equal(rawA.handover, "alpha-body");
     assert.equal(rawB.handover, "beta-body");
-    const scopes = readdirSync(join(dir, SUBDIR)).sort();
+    assert.deepEqual(readdirSync(dir), []);
+    const scopes = readdirSync(storageRoot()).sort();
     assert.equal(scopes.length, 2);
     for (const entry of scopes) assert.match(entry, /^[0-9a-f]{64}$/);
     assert.ok(!scopes.includes("task-a") && !scopes.includes("task-b"));
@@ -550,8 +565,53 @@ describe("handover storage", () => {
       {},
     );
     assert.match(String(again), /already stored.*original is kept/);
-    const rawA2 = JSON.parse(readFileSync(taskFile(dir, "task-a", "handover.json"), "utf8")) as Record<string, unknown>;
+    const rawA2 = JSON.parse(readFileSync(taskFile(DEFAULT_PROJECT, "task-a", "handover.json"), "utf8")) as Record<string, unknown>;
     assert.equal(rawA2.handover, "alpha-body");
+  });
+
+  it("stores outside the project working directory", async () => {
+    const projectDir = freshDir();
+    const taskDir = freshDir();
+    const { task } = makeTask({ dir: taskDir });
+    const { project } = makeProject({ baseDir: projectDir, tasksById: {} });
+    const { ctx } = makeCtx({ task, project, models: [] });
+    const ext = await load(ctx);
+    const tools = toolMap(ext, ctx);
+    await tools.get("context-handover")!.execute({ handover: "outside-body", summary: "s" }, undefined, ctx, {});
+    assert.deepEqual(readdirSync(projectDir), []);
+    assert.deepEqual(readdirSync(taskDir), []);
+    assert.deepEqual(subdirFiles(projectDir), ["handover.json"]);
+    for (const dir of [join(homedir(), ".aiderdesk"), storageRoot(), join(storageRoot(), scopeHash(projectDir, "task-1"))]) {
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    }
+    assert.equal(statSync(taskFile(projectDir, "task-1", "handover.json")).mode & 0o777, 0o600);
+    const raw = JSON.parse(readFileSync(taskFile(projectDir, "task-1", "handover.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(raw.handover, "outside-body");
+  });
+
+  it("isolates identical task ids across projects by hashed project scope", async () => {
+    const projectDirA = freshDir();
+    const projectDirB = freshDir();
+    const { task: taskA } = makeTask({ id: "shared", dir: freshDir() });
+    const { task: taskB } = makeTask({ id: "shared", dir: freshDir() });
+    const { project: projectA } = makeProject({ baseDir: projectDirA, tasksById: { shared: taskA } });
+    const { project: projectB } = makeProject({ baseDir: projectDirB, tasksById: { shared: taskB } });
+    const { ctx: ctxA } = makeCtx({ task: taskA, project: projectA, models: [] });
+    const { ctx: ctxB } = makeCtx({ task: taskB, project: projectB, models: [] });
+    const ext = await load(ctxA);
+    const toolsA = toolMap(ext, ctxA);
+    const toolsB = toolMap(ext, ctxB);
+    await toolsA.get("context-handover")!.execute({ handover: "alpha-shared", summary: "a" }, undefined, ctxA, {});
+    await toolsB.get("context-handover")!.execute({ handover: "beta-shared", summary: "b" }, undefined, ctxB, {});
+    assert.notEqual(scopeHash(projectDirA, "shared"), scopeHash(projectDirB, "shared"));
+    const readA = String(await toolsA.get("read-handover")!.execute({ taskId: "shared" }, undefined, ctxA, {}));
+    const readB = String(await toolsB.get("read-handover")!.execute({ taskId: "shared" }, undefined, ctxB, {}));
+    assert.ok(readA.endsWith("\n\nalpha-shared"));
+    assert.ok(readB.endsWith("\n\nbeta-shared"));
+    const scopes = readdirSync(storageRoot()).sort();
+    assert.equal(scopes.length, 2);
+    assert.deepEqual(readdirSync(projectDirA), []);
+    assert.deepEqual(readdirSync(projectDirB), []);
   });
 });
 
@@ -565,7 +625,7 @@ describe("no automatic continuation", () => {
     assert.equal((ext as unknown as { onPromptFinished?: unknown }).onPromptFinished, undefined);
     const tools = toolMap(ext, ctx);
     await tools.get("context-handover")!.execute({ handover: "body", summary: "s" }, undefined, ctx, {});
-    assert.deepEqual(subdirFiles(dir), ["handover.json"]);
+    assert.deepEqual(subdirFiles(DEFAULT_PROJECT), ["handover.json"]);
     assert.deepEqual(projectCalls.created, []);
     assert.deepEqual(taskCalls.runPrompts, []);
   });
@@ -588,7 +648,7 @@ describe("no automatic continuation", () => {
       {},
     );
     assert.match(String(again), /already stored/);
-    assert.deepEqual(subdirFiles(dir), ["handover.json"]);
+    assert.deepEqual(subdirFiles(DEFAULT_PROJECT), ["handover.json"]);
     assert.deepEqual(projectCalls.created, []);
   });
 });
