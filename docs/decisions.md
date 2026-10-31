@@ -1,5 +1,10 @@
 # Decisions
 
+## User decision: child handover completion phase (2026-10-31)
+
+- OpenCode child handover locks tools immediately but preserves its summary-bearing continuation guidance during the handover turn. Persist the calling assistant message ID; allow the initial reply only while that anchor and every later history entry are error-free assistant steps with recognized continuing finishes (`tool-calls` or `length`). Terminal, failed/interrupted, missing or unrecognized states, later input, unavailable history and legacy locks receive locked refusal guidance. Root lifecycle, hard ceiling and loop guard are unchanged.
+- Locked-child guidance uses successor reader-reference seeding, never a parent-pasted full handover. This supersedes the locked-reply exception in the text-only parity decision. Claude already has separate turn-aware handback and reference guidance; no Claude lifecycle change. [Evidence](changes/archive/child-handover-completion.md).
+
 ## User decision: shared soft default and successor effort (2026-10-31)
 
 - Raise the current soft default across adapters from 150000 to 200000 tokens. Keep integer soft values capped at 70% of known windows where supported, explicit percentages uncapped, and integer-only unknown-window adapters uncapped. Historical test thresholds remain evidence, not current defaults.

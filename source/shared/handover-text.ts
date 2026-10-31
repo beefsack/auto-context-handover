@@ -119,7 +119,7 @@ export function buildLockedChildFollowup(readerInvocation: string): string {
     `${CHILD_SUMMARY_PREFIX} This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
     `Default: ${readerInvocation}, ` +
     `spawn a successor of the same agent type and model and variant/effort (or a fresh subagent to investigate and continue); if unavailable, reuse the predecessor's original spawn parameters including effort, ` +
-    `seed it with the original task pointer and the full handover. ` +
+    `seed it with the original task pointer and a reader instruction to continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
     `${SEED_FRAMING} ` +
     `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`
   )

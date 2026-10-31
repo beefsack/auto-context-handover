@@ -578,6 +578,143 @@ describe("auto-context-handover harness", () => {
     assert.deepEqual(Object.keys(later.tools), [])
   })
 
+  it("preserves the active tool turn, then locks completed and later turns", async () => {
+    const fake = makeFake({})
+    await setup(fake)
+    const assistantCall: Record<string, unknown> = {
+      id: "msg_assistant_call",
+      type: "assistant",
+      finish: "tool-calls",
+      content: [{ type: "tool", id: "call_handover", name: "context_handover", state: { status: "running", input: {} } }],
+    }
+    fake.sessions.set("ses_child_turn", {
+      id: "ses_child_turn",
+      parentID: "ses_parent",
+      agent: "build",
+      history: [{ id: "msg_user_first", type: "user", text: "continue this task" }, assistantCall],
+    })
+    const context = fake.hooks.get("context")
+    const handover = fake.tools.get("context_handover")
+    assert.ok(context && handover)
+    const request = contextEvent("ses_child_turn", { bash: {}, context_handover: {} }, {
+      providerID: "anthropic",
+      id: "claude",
+      variant: "high",
+    })
+    await context(request as unknown as Record<string, unknown>)
+    const initial = await handover.execute(
+      { handover: "full child handover", summary: "summary preserved" },
+      { sessionID: "ses_child_turn", agent: "build", messageID: "msg_assistant_call" },
+    )
+    const lock = fake.storage.get("auto-context-handover:lock:ses_child_turn") as {
+      finalReply: string
+      toolMessageID: string
+    }
+    assert.equal(lock.toolMessageID, "msg_assistant_call")
+    assert.match(String(initial.content), /summary preserved/)
+    assert.match(String(initial.content), /anthropic\/claude; variant\/effort=high/)
+    const toolPart = (assistantCall.content as Array<Record<string, unknown>>)[0]!
+    toolPart.state = { status: "completed", input: {}, content: [{ type: "text", text: initial.content }] }
+
+    const sameTurn = contextEvent("ses_child_turn", { bash: {}, context_handover: {} })
+    await context(sameTurn as unknown as Record<string, unknown>)
+    assert.deepEqual(Object.keys(sameTurn.tools), [])
+    const sameTurnGuidance = JSON.stringify(sameTurn.messages)
+    assert.match(sameTurnGuidance, /summary preserved/)
+    assert.match(sameTurnGuidance, /anthropic\/claude; variant\/effort=high/)
+    assert.ok(!sameTurnGuidance.includes("locked after a context handover"))
+
+    fake.sessions.get("ses_child_turn")?.history?.push({
+      id: "msg_assistant_second",
+      type: "assistant",
+      finish: "tool-calls",
+      content: [{ type: "tool", id: "call_other", name: "read", state: { status: "completed", input: {}, content: [{ type: "text", text: "other tool result" }] } }],
+    })
+    const continuedTurn = contextEvent("ses_child_turn", { bash: {}, context_handover: {} })
+    await context(continuedTurn as unknown as Record<string, unknown>)
+    assert.deepEqual(Object.keys(continuedTurn.tools), [])
+    const continuedTurnGuidance = JSON.stringify(continuedTurn.messages)
+    assert.match(continuedTurnGuidance, /summary preserved/)
+    assert.match(continuedTurnGuidance, /anthropic\/claude; variant\/effort=high/)
+
+    fake.sessions.get("ses_child_turn")?.history?.push({
+      id: "msg_assistant_final",
+      type: "assistant",
+      finish: "stop",
+      content: [{ type: "text", text: lock.finalReply }],
+    })
+    const resumed = contextEvent("ses_child_turn", { bash: {}, context_handover: {} })
+    await context(resumed as unknown as Record<string, unknown>)
+    assert.deepEqual(Object.keys(resumed.tools), [])
+    const resumedGuidance = JSON.stringify(resumed.messages)
+    assert.match(resumedGuidance, /locked after a context handover/)
+    assert.ok(!resumedGuidance.includes("summary preserved"))
+
+    fake.sessions.get("ses_child_turn")?.history?.push({ id: "msg_user_later", type: "user", text: "what next?" })
+    const later = contextEvent("ses_child_turn", { bash: {}, context_handover: {} })
+    await context(later as unknown as Record<string, unknown>)
+    assert.deepEqual(Object.keys(later.tools), [])
+    const laterGuidance = JSON.stringify(later.messages)
+    assert.match(laterGuidance, /locked after a context handover/)
+    assert.match(laterGuidance, /cannot answer questions or do more work/)
+    assert.ok(!laterGuidance.includes("summary preserved"))
+    assert.ok(!laterGuidance.includes("full child handover"))
+  })
+
+  it("refuses child continuation for failed, terminal, or unknown assistant states", async () => {
+    const cases: Array<{
+      label: string
+      anchor: Record<string, unknown>
+      following?: Record<string, unknown>
+    }> = [
+      { label: "anchor stop", anchor: { finish: "stop" } },
+      { label: "anchor content-filter", anchor: { finish: "content-filter" } },
+      { label: "anchor error", anchor: { finish: "error" } },
+      { label: "anchor tool-calls with error", anchor: { finish: "tool-calls", error: { name: "interrupted" } } },
+      { label: "anchor unknown finish", anchor: { finish: "future-finish" } },
+      { label: "anchor missing finish", anchor: {} },
+      { label: "following stop", anchor: { finish: "tool-calls" }, following: { finish: "stop" } },
+      { label: "following content-filter", anchor: { finish: "tool-calls" }, following: { finish: "content-filter" } },
+      { label: "following error finish", anchor: { finish: "tool-calls" }, following: { finish: "error" } },
+      { label: "following tool-calls with error", anchor: { finish: "tool-calls" }, following: { finish: "tool-calls", error: { name: "interrupted" } } },
+      { label: "following unknown finish", anchor: { finish: "tool-calls" }, following: { finish: "future-finish" } },
+      { label: "following missing finish", anchor: { finish: "tool-calls" }, following: {} },
+    ]
+    for (const [index, scenario] of cases.entries()) {
+      const fake = makeFake({})
+      await setup(fake)
+      const anchor: Record<string, unknown> = {
+        id: `msg_call_${index}`,
+        type: "assistant",
+        content: [{ type: "tool", id: `call_${index}`, name: "context_handover", state: { status: "running", input: {} } }],
+        ...scenario.anchor,
+      }
+      const history: Array<Record<string, unknown>> = [
+        { id: `msg_user_${index}`, type: "user", text: "do the task" },
+        anchor,
+      ]
+      if (scenario.following) history.push({ id: `msg_following_${index}`, type: "assistant", content: [], ...scenario.following })
+      fake.sessions.set(`ses_failed_${index}`, { id: `ses_failed_${index}`, parentID: "ses_parent", agent: "build", history })
+      const context = fake.hooks.get("context")
+      const handover = fake.tools.get("context_handover")
+      assert.ok(context && handover, scenario.label)
+      const request = contextEvent(`ses_failed_${index}`, { bash: {}, context_handover: {} })
+      await context(request as unknown as Record<string, unknown>)
+      const result = await handover.execute(
+        { handover: "full handover", summary: `summary ${scenario.label}` },
+        { sessionID: `ses_failed_${index}`, agent: "build", messageID: `msg_call_${index}` },
+      )
+      const toolPart = (anchor.content as Array<Record<string, unknown>>)[0]!
+      toolPart.state = { status: "completed", input: {}, content: [{ type: "text", text: result.content }] }
+      const afterTool = contextEvent(`ses_failed_${index}`, { bash: {}, context_handover: {} })
+      await context(afterTool as unknown as Record<string, unknown>)
+      assert.deepEqual(Object.keys(afterTool.tools), [], scenario.label)
+      const guidance = JSON.stringify(afterTool.messages)
+      assert.match(guidance, /locked after a context handover/, scenario.label)
+      assert.ok(!guidance.includes(`summary ${scenario.label}`), scenario.label)
+    }
+  })
+
   it("reads back verbatim text with links from another session", async () => {
     const fake = makeFake({})
     await setup(fake)
@@ -1555,7 +1692,7 @@ describe("auto-context-handover harness", () => {
         `Context handover (incomplete): This subagent session is locked after a context handover and cannot answer questions or do more work. ` +
         `Default: read the full handover with read_handover({"sessionID":"ses_exact"}), ` +
         `spawn a successor of the same agent type and model and variant/effort (or a fresh subagent to investigate and continue); if unavailable, reuse the predecessor's original spawn parameters including effort, ` +
-        `seed it with the original task pointer and the full handover. ` +
+        `seed it with the original task pointer and a reader instruction to continue from 'Prioritized next steps'; do not paste the handover into the spawn prompt. ` +
         `${SEED_FRAMING} ` +
         `The parent may redirect; ask the user only about handover-listed user-owned decisions unrelated to context size.`
       assert.equal(buildLockedChildReturn("ses_exact"), expected)

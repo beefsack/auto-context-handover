@@ -46,6 +46,8 @@ export interface StoredLock {
   readonly at: number
   /** Initial parent-facing child reply; its presence selects child locked-follow-up guidance. Never the full handover. */
   readonly finalReply?: string
+  /** Assistant message that called the child handover; absent for legacy locks. */
+  readonly toolMessageID?: string
 }
 
 export interface StoredState {

@@ -97,7 +97,31 @@ const asStoredHandover = (value: Record<string, unknown> | undefined): StoredHan
 const asStoredLock = (value: Record<string, unknown> | undefined): StoredLock | undefined => {
   if (!value || typeof value.reason !== "string") return undefined
   const reply = typeof value.finalReply === "string" ? value.finalReply : undefined
-  return { reason: value.reason, at: typeof value.at === "number" ? value.at : 0, ...(reply === undefined ? {} : { finalReply: reply }) }
+  return {
+    reason: value.reason,
+    at: typeof value.at === "number" ? value.at : 0,
+    ...(reply === undefined ? {} : { finalReply: reply }),
+    ...(typeof value.toolMessageID === "string" ? { toolMessageID: value.toolMessageID } : {}),
+  }
+}
+
+const childReplyTurnIsOpen = (messages: unknown, toolMessageID: string): boolean => {
+  if (!Array.isArray(messages)) return false
+  const anchor = messages.findIndex((message) => isRecord(message) && message.id === toolMessageID && message.type === "assistant")
+  if (anchor === -1) return false
+  const anchorMessage = messages[anchor]
+  if (!isRecord(anchorMessage) || anchorMessage.error !== undefined || (anchorMessage.finish !== "tool-calls" && anchorMessage.finish !== "length")) {
+    return false
+  }
+  for (const message of messages.slice(anchor + 1)) {
+    if (!isRecord(message)) return false
+    if (
+      message.type !== "assistant" ||
+      message.error !== undefined ||
+      (message.finish !== "tool-calls" && message.finish !== "length")
+    ) return false
+  }
+  return true
 }
 
 const asStoredState = (value: Record<string, unknown> | undefined): StoredState | undefined => {
@@ -220,15 +244,20 @@ export default Plugin.define({
             }
 
             if (info.parentID) {
-              // Subagents never open root sessions. Persistent stop lock; the
-              // next hook strips all tools and prescribes a locked refusal.
-              // No loop accounting for children, and the full
-              // handover text is never included in the return.
+              // Subagents never open root sessions. Tools lock immediately;
+              // the same assistant turn may still deliver its short reply.
+              // No loop accounting for children, and the full handover text
+              // is never included in the return.
               const finalReply = buildSubagentReturn(summary || "Handover stored.", sessionID, identity)
               try {
                 await ctx.storage.set(
                   keys.lock(sessionID),
-                  { reason: "subagent handover returned to parent", at: Date.now(), finalReply } as unknown as Parameters<typeof ctx.storage.set>[1],
+                  {
+                    reason: "subagent handover returned to parent",
+                    at: Date.now(),
+                    finalReply,
+                    toolMessageID: toolCtx.messageID,
+                  } as unknown as Parameters<typeof ctx.storage.set>[1],
                 )
               } catch (error) {
                 throw new Tool.Error({
@@ -489,6 +518,16 @@ export default Plugin.define({
         const locked = asStoredLock(await readJson(ctx, keys.lock(event.sessionID)))
         if (locked) {
           for (const name of Object.keys(event.tools)) delete event.tools[name]
+          if (locked.finalReply && locked.toolMessageID) {
+            const replyTurnIsOpen = await ctx.session
+              .context({ sessionID: event.sessionID })
+              .then((messages) => childReplyTurnIsOpen(messages, locked.toolMessageID!))
+              .catch(() => false)
+            if (replyTurnIsOpen) {
+              event.messages.push(Message.system(locked.finalReply))
+              return
+            }
+          }
           event.messages.push(
             Message.system(locked.finalReply ? buildLockedChildDirective(locked.reason, event.sessionID) : buildLockedDirective(locked.reason, event.sessionID)),
           )
