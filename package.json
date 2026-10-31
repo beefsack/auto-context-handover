@@ -49,13 +49,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@opencode/ai": "~2.1",
-    "@opencode/schema": "~2.1",
-    "effect": "4.0.1",
+    "@opencode/ai": ">=2.2 <3",
+    "@opencode/schema": ">=2.2 <3",
+    "effect": "^4",
     "typebox": "1.4.3"
   },
   "peerDependencies": {
-    "@opencode/plugin": "~2.1"
+    "@opencode/plugin": ">=2.2 <3"
   },
   "devDependencies": {
     "@aiderdesk/extensions": "^0",
@@ -65,7 +65,7 @@
     "@kilocode/plugin": "^7",
     "@kilocode/sdk": "^7",
     "@mariozechner/pi-coding-agent": "^0",
-    "@opencode/plugin": "~2.1",
+    "@opencode/plugin": ">=2.2 <3",
     "@types/node": "22.10.2",
     "typescript": "5.7.3",
     "zod": "4.6.7"

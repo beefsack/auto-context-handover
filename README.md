@@ -1,6 +1,6 @@
 # auto-context-handover
 
-Measured soft-limit handover plugin for OpenCode V2 (verified against 2.1.4).
+Measured soft-limit handover plugin for OpenCode V2 (supports `>=2.2 <3`, assessed against 2.2.5).
 
 Also includes a [Pi root-session adapter](#pi-root-session-adapter) (assessed
 against 0.73.1, manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
@@ -29,7 +29,7 @@ Non-OpenCode adapters have no hard token gate; live model compliance remains unv
 
 | Harness | Status | Scope | Known issues / missing functionality |
 | --- | --- | --- | --- |
-| [OpenCode (primary)](#behavior) | Supported | Automatic root rollover + subagents; opt-in hard limit | Held at `~2.1` (2.2.0 removed `Message`); root successors cannot resume background children |
+| [OpenCode (primary)](#behavior) | Supported (`>=2.2 <3`) | Automatic root rollover + subagents; opt-in hard limit | Assessed 2.2.5; root successors cannot resume background children |
 | [Claude Code](#claude-code-subagent-only-adapter) | Supported | Subagents only; roots intro/read only | 10-35% batch overshoot; hard limit pending, parent continuation advisory |
 | [Codex CLI](#codex-cli-subagent-first-adapter) | Supported | Subagent-first | Undocumented source-only `PostModelRequest`; integer-only uncapped soft, live untested |
 | [GitHub Copilot CLI](#github-copilot-cli-subagent-first-adapter) | Supported | Child-first | Experimental extension API, live untested; general-purpose children lack lifecycle hooks |
@@ -60,8 +60,12 @@ Non-OpenCode adapters have no hard token gate; live model compliance remains unv
 
 Adapters target the latest harness releases and accept update breakage. Exact
 versions below identify assessment evidence, not installation pins. Necessary
-compatibility ranges stop at major or major.minor: OpenCode currently uses
-`~2.1` because 2.2.0 removes the `@opencode/ai` `Message` export used here.
+compatibility ranges stop at major or major.minor: OpenCode uses `>=2.2 <3`.
+The adapter imports `Message` from `@opencode/ai/effect`, available throughout
+2.2, rather than the root export missing in 2.2.0-2.2.3. OpenCode 2.1 is no
+longer in the supported range. The 2.2.5 assessment covers types, regression
+fixtures and isolated server setup without model calls; historical 2.1.4 live
+checks below are not new 2.2.5 end-to-end evidence.
 
 ```jsonc
 {

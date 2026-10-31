@@ -4,7 +4,7 @@
 // session-keyed KV, never in external files.
 
 import { Plugin } from "@opencode/plugin"
-import { Message } from "@opencode/ai"
+import { Message } from "@opencode/ai/effect"
 import { Tool } from "@opencode/schema/tool"
 import { Schema } from "effect"
 import { parseConfig } from "./config.ts"

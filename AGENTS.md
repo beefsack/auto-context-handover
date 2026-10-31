@@ -2,7 +2,7 @@
 
 ## Functional Specification
 
-- `auto-context-handover` is a TypeScript plugin for OpenCode V2 2.1.4: measure context, nudge model-written handover, optionally hard-gate tools, and rotate sessions.
+- `auto-context-handover` is a TypeScript plugin for OpenCode V2 `>=2.2 <3`: measure context, nudge model-written handover, optionally hard-gate tools, and rotate sessions.
 - `README.md` describes behavior and installation; `docs/` holds project decisions, principles, research, and change records.
 
 ## Live Testing

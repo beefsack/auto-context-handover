@@ -6,10 +6,16 @@
 - State the observed variant/effort at handover and require successors to reuse the same model and variant/effort. OpenCode already forwards the context hook's request variant unchanged to root creation; persist and expose it in readback, successor seeds and child replies. The plugin path does not explain a reported high-to-xhigh change; nondefault end-to-end carry-over remains unverified.
 - Claude's existing `turn.step` request event exposes `effort`; carry that observation through the existing handover metadata and state it alongside recorded type/model. Unavailable effort remains `unknown`; reuse the predecessor's original spawn parameters including effort. Never infer effort from usage. Other adapters gain only automatically shared guidance, with no new capture mechanisms.
 
+## OpenCode latest-version migration (2026-10-31)
+
+- Replace the temporary OpenCode `~2.1` compatibility exception with `>=2.2 <3` for runtime AI/schema and plugin peer/development dependencies. Assessed latest published AI/schema/plugin and isolated server setup: 2.2.5. Exact versions are evidence, not constraints; keep targeting latest within the supported major. OpenCode 2.1 is outside the supported range.
+- Import `Message` from `@opencode/ai/effect`: the root export is absent in 2.2.0-2.2.3 and restored in 2.2.4-2.2.5, while the Effect entry supplies the required constructor from 2.2.0. Align the direct Effect dependency to `^4` so current OpenCode dependencies share compatible schema types instead of mixing 4.0.1 with 4.0.6.
+- No lifecycle, threshold, storage, variant, gating or TUI behavior changes. Types, existing regression fixtures and isolated non-model server setup establish migration compatibility, not new model compliance or end-to-end rollover/TUI evidence. [Assessment and evidence](changes/archive/opencode-latest.md).
+
 ## Cross-adapter harness currency and compatibility (2026-10-29)
 
 - Target latest harness; accept breakage instead of exact pins. Needed constraints are major or major.minor only, never patch. Exact assessed versions/commits remain evidence, not version pins; read `pinned source` as `assessed source` throughout.
-- Development compatibility exception: OpenCode runtime/schema/plugin peer `~2.1` due to typecheck breakage on 2.2.0 (missing `Message` export, `source/index.ts:7`); other harnesses use broad major ranges (`^0` for pre-1.0, `^7` Kilo, `^1` Copilot) or unpinned `*` for Amp's prerelease-only package; OpenHands `>=1,<2`, SDK 1.59.0 passed Python tests. Crush's runtime server guard likewise accepts stable major-0 releases instead of an exact patch, while retaining nightly rejection and host identity checks.
+- The historical OpenCode `~2.1` development exception is superseded by the migration above. Other harnesses use broad major ranges (`^0` for pre-1.0, `^7` Kilo, `^1` Copilot) or unpinned `*` for Amp's prerelease-only package; OpenHands `>=1,<2`, SDK 1.59.0 passed Python tests. Crush's runtime server guard likewise accepts stable major-0 releases instead of an exact patch, while retaining nightly rejection and host identity checks.
 - Confidence note for unverified estimators and unstable undocumented host surfaces (e.g. Codex PostModelRequest, Copilot experimental extension, Kilo experimental hooks): confidence may come from experimentation, unofficial docs, or prior art, not automatic proof of live compliance.
 
 ## OpenHands SDK advisory MVP (2026-10-29)
