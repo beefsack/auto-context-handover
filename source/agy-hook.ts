@@ -3,6 +3,7 @@ import {
   didStageEscalate,
   evaluateStage,
   extractSoftOverride,
+  isHandoverToolCall,
   isHandoverToolName,
   loadAgyConfig,
   measureTranscriptFile,
@@ -128,13 +129,14 @@ function handlePreInvocation(dataDir: string, input: AgyHookInput): Record<strin
 
 function handlePreToolUse(dataDir: string, input: AgyHookInput): Record<string, unknown> {
   const id = input.conversationId
-  if (!id) return {}
+  if (!id) return { decision: "allow" }
 
   const state = upsertSessionMetadata(dataDir, input)
-  if (!state) return {}
+  if (!state) return { decision: "allow" }
 
-  const toolName = input.toolCall?.name
-  const isHandover = isHandoverToolName(toolName)
+  const toolCall = input.toolCall
+  const toolName = toolCall?.name
+  const isHandoverAllowed = isHandoverToolCall(toolCall)
 
   if (state.locked) {
     return {
@@ -150,21 +152,21 @@ function handlePreToolUse(dataDir: string, input: AgyHookInput): Record<string, 
   try {
     config = loadAgyConfig(dataDir, input.workspacePaths)
   } catch {
-    return {}
+    return { decision: "allow" }
   }
 
   const measurement = measureTranscriptFile(input.transcriptPath)
   const evaluation = evaluateStage(measurement, config, input.modelName, state.softOverride)
 
-  if (evaluation?.stage === "hard" && !isHandover) {
+  if (evaluation?.stage === "hard" && !isHandoverAllowed) {
     return {
       decision: "deny",
       reason: buildHardDirective(evaluation.hardTokens),
     }
   }
 
-  if (isHandover) {
-    const existingArgs = input.toolCall?.args ?? {}
+  const existingArgs = toolCall?.args ?? {}
+  if (isHandoverToolName(toolName)) {
     if (typeof existingArgs.sessionId !== "string" || !existingArgs.sessionId.trim()) {
       return {
         decision: "allow",
@@ -176,7 +178,30 @@ function handlePreToolUse(dataDir: string, input: AgyHookInput): Record<string, 
     return { decision: "allow" }
   }
 
-  return {}
+  if (toolName === "call_mcp_tool") {
+    const subTool = typeof existingArgs.ToolName === "string" ? existingArgs.ToolName : undefined
+    if (isHandoverToolName(subTool)) {
+      const subArgs =
+        typeof existingArgs.Arguments === "object" &&
+        existingArgs.Arguments !== null &&
+        !Array.isArray(existingArgs.Arguments)
+          ? (existingArgs.Arguments as Record<string, unknown>)
+          : {}
+      if (typeof subArgs.sessionId !== "string" || !subArgs.sessionId.trim()) {
+        return {
+          decision: "allow",
+          overwrite: {
+            Arguments: {
+              ...subArgs,
+              sessionId: id,
+            },
+          },
+        }
+      }
+    }
+  }
+
+  return { decision: "allow" }
 }
 
 function main(): void {

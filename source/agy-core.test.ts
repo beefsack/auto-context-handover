@@ -189,7 +189,16 @@ test("end-to-end hooks + MCP server flow: nudge, hard gate, handover, lock, read
     })
     assert.deepEqual(warnRepeat, {})
 
-    // 3. Cross hard limit (2500 >= 2000) -> PreToolUse denies run_command, allows context_handover with sessionId overwrite
+    const allowNormal = runHook("pre-tool-use", {
+      conversationId: "conv-e2e",
+      transcriptPath,
+      artifactDirectoryPath: artifactDir,
+      workspacePaths: [dir],
+      toolCall: { name: "run_command", args: { CommandLine: "ls" } },
+    })
+    assert.equal(allowNormal.decision, "allow")
+
+    // 3. Cross hard limit (2500 >= 2000) -> PreToolUse denies run_command, allows context_handover & lazy call_mcp_tool
     fs.writeFileSync(
       transcriptPath,
       JSON.stringify({ type: "PLANNER_RESPONSE", input_tokens: 2000, cache_read_tokens: 400, output_tokens: 100 }) + "\n",
@@ -202,6 +211,37 @@ test("end-to-end hooks + MCP server flow: nudge, hard gate, handover, lock, read
       toolCall: { name: "run_command", args: { CommandLine: "ls" } },
     })
     assert.equal(denyCmd.decision, "deny")
+
+    const allowSchemaRead = runHook("pre-tool-use", {
+      conversationId: "conv-e2e",
+      transcriptPath,
+      artifactDirectoryPath: artifactDir,
+      workspacePaths: [dir],
+      toolCall: {
+        name: "read_file",
+        args: { Path: "/tmp/mcp/auto-context-handover/context_handover.json" },
+      },
+    })
+    assert.equal(allowSchemaRead.decision, "allow")
+
+    const allowLazyHandover = runHook("pre-tool-use", {
+      conversationId: "conv-e2e",
+      transcriptPath,
+      artifactDirectoryPath: artifactDir,
+      workspacePaths: [dir],
+      toolCall: {
+        name: "call_mcp_tool",
+        args: {
+          ServerName: "auto-context-handover_auto-context-handover",
+          ToolName: "context_handover",
+          Arguments: { handover: "full", summary: "short" },
+        },
+      },
+    })
+    assert.equal(allowLazyHandover.decision, "allow")
+    assert.deepEqual(allowLazyHandover.overwrite, {
+      Arguments: { handover: "full", summary: "short", sessionId: "conv-e2e" },
+    })
 
     const allowHandover = runHook("pre-tool-use", {
       conversationId: "conv-e2e",

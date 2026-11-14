@@ -311,6 +311,20 @@ export function isHandoverToolName(toolName: string | undefined): boolean {
   )
 }
 
+export function isHandoverToolCall(toolCall: AgyHookInput["toolCall"]): boolean {
+  if (!toolCall) return false
+  if (isHandoverToolName(toolCall.name)) return true
+  if (toolCall.name === "call_mcp_tool") {
+    const subTool = typeof toolCall.args?.ToolName === "string" ? toolCall.args.ToolName : undefined
+    return isHandoverToolName(subTool)
+  }
+  if (toolCall.name === "read_file" || toolCall.name === "view_file") {
+    const filePath = typeof toolCall.args?.Path === "string" ? toolCall.args.Path : ""
+    return filePath.endsWith("/context_handover.json")
+  }
+  return false
+}
+
 export function storeHandover(params: {
   readonly dataDir: string
   readonly sessionId: string
