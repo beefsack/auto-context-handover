@@ -22,7 +22,9 @@
     "!openhands/__pycache__",
     "pi",
     "plugin.json",
+    "hooks.json",
     "mcp.json",
+    "mcp_config.json",
     ".codex-plugin",
     "qwen",
     "README.md"

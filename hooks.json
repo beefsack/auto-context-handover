@@ -1,0 +1,27 @@
+{
+  "auto-context-handover": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./source/agy-hook.ts session-start"
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./source/agy-hook.ts pre-invocation"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./source/agy-hook.ts pre-tool-use"
+          }
+        ]
+      }
+    ]
+  }
+}

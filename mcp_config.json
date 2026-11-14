@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "auto-context-handover": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "exec node \"$PLUGIN_ROOT/source/agy-mcp.ts\""
+      ]
+    }
+  }
+}
