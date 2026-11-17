@@ -53,11 +53,12 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@opencode/ai": ">=2.2 <3",
     "@opencode/schema": ">=2.2 <3",
-    "effect": "^4",
-    "typebox": "1.4.3"
+    "effect": "^4"
   },
   "peerDependencies": {
-    "@opencode/plugin": ">=2.2 <3"
+    "@mariozechner/pi-coding-agent": "*",
+    "@opencode/plugin": ">=2.2 <3",
+    "typebox": "*"
   },
   "devDependencies": {
     "@aiderdesk/extensions": "^0",
@@ -69,6 +70,7 @@
     "@mariozechner/pi-coding-agent": "^0",
     "@opencode/plugin": ">=2.2 <3",
     "@types/node": "22.10.2",
+    "typebox": "1.4.3",
     "typescript": "5.7.3",
     "zod": "4.6.7"
   }
