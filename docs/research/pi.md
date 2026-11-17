@@ -1,18 +1,103 @@
 # Pi adapter assessment and evidence
 
-Status (2026-10-28): **root-session MVP shipped; command-driven rollover**.
-Measurement, advisory wording, storage and continuation callbacks are
-fixture-covered. Package installation and extension registration are observed
-without a model call. Model compliance and end-to-end rollover are unverified.
-This refresh supersedes the earlier Pi package/version claims in
-[prior art](prior-art.md); it does not reinterpret third-party subagents as core.
+Status (2026-11-17): **automatic root rollover by default on Pi 1.x**, with
+manual `/handover` fallback. An isolated Pi 1.5.2 offline-provider probe observed
+the real handover tool, settled-event command dispatch, seeded successor and
+admitted continuation with zero load diagnostics. Real-model compliance and
+interactive end-to-end behavior remain unverified. The original 0.73.1 dispatch
+failure below is historical, not a current restriction. No third-party subagent
+integration is claimed.
 
-## Primary sources
+## Pi 1.5.2 reassessment
+
+- Current package: `@earendil-works/pi-coding-agent@1.5.2`, repository
+  `earendil-works/pi`, `packages/coding-agent`; host Node requirement >=22.19.0.
+  The old `@mariozechner/pi-coding-agent@0.73.1` package is deprecated in favor
+  of the canonical scope. Development types target `^1`; Pi and `typebox`
+  remain host-provided `*` peers. Pi imports are type-only, so the plugin's
+  root Node floor is unchanged; running Pi still requires the host's floor.
+- Shipped `docs/extensions.md` documents command-only replacement at
+  lines 1320-1500 and the tool/settled-command pattern at lines 1538-1572.
+  `examples/extensions/reload-runtime.ts` uses the same pattern. Legacy
+  package names map to the canonical modules in the host loader.
+- `sendUserMessage('/handover', {expandPromptTemplates:true})` from
+  `agent_settled` is actual command dispatch. Without explicit expansion,
+  including the old `deliverAs`-only example, slash text is plain model input.
+  `dist/core/agent-session.js` defers settled-handler messages until all such
+  handlers finish, then dispatches the command. No old command context is
+  retained for events.
+- Successful storage sets one in-memory request scoped to run, session/file
+  and the stored entry's active-branch membership, and returns `terminate:true`.
+  Settlement consumes it once. Aborts, lifecycle changes and uncertain branch
+  attribution do not roll over. Stored/historical entries alone never trigger
+  a request; reload does not replay them. No automatic retries.
+- The existing `/handover` command remains the only replacement implementation:
+  wait for idle, read the fresh branch snapshot, seed full text once plus
+  backlink, then send kickoff only through fresh `withSession` context.
+  Source text is retained. Cancellation reports unchanged source and fallback.
+  Synchronous dispatch errors and command/continuation failures identify source
+  recovery. `pi.sendUserMessage` returns `void`; asynchronous dispatch failures
+  go to Pi's extension-error surface, not the surrounding try/catch. The tool
+  result already identifies `/handover` fallback. A preflight notice explains
+  recovery before replacement; stale-context notification failures throw to
+  the host error surface rather than disappearing silently.
+- `dist/core/agent-session-runtime.js` tears down the old runtime before setup
+  and `withSession`. Old `pi`/`ctx` access is stale. The interactive host's
+  `dist/modes/interactive/interactive-mode.js` binds command actions to runtime
+  replacement and rebinds its current session/view after switching. Thus TUI
+  following is source-established, not an observed interactive run. Its
+  `newSession` wrapper catches replacement errors, displays a fatal error and
+  exits before the plugin's catch can run. Preflight recovery guidance is
+  therefore essential. Relaunch if needed and inspect sessions before recovery.
+- No Pi chain guard is implemented. `source/measure.ts` already supplies
+  first-root exclusion, >=25%-of-soft productivity and three-unproductive
+  thresholds. Exact behavior also needs persisted predecessor/pre-call/high-water
+  state and a choice of stop behavior without Pi source locks. That port remains
+  a proposal, not invented parameters or an implicit new lifecycle decision.
+
+### Current isolated non-model evidence
+
+A temporary SDK harness used isolated `HOME` and `PI_CODING_AGENT_DIR`, an
+in-memory settings manager, private session files, fresh services per runtime,
+and `ModelRuntime` with `modelsPath:null`, `allowModelNetwork:false` and
+`refreshOnCreate:false`. Its faux provider streamed a deterministic call to the
+real `context_handover` tool, then a successor response. No network request or
+real-model invocation occurred. Command actions were bound to
+`AgentSessionRuntime`, matching the interactive host's ownership contract.
+The resource loader loaded the repository's real `pi/index.ts`, not a copy or
+replacement implementation.
+
+With `ISO` the isolated directory and `PROBE` that temporary harness:
+
+```sh
+: "${ISO:?}" "${PROBE:?}"
+env HOME="$ISO/home" PI_CODING_AGENT_DIR="$ISO/agent" \
+  PROBE_REPORT=probe-tool-report.json node "$PROBE"
+```
+
+Exit 0: stored text/summary verbatim, actual `/handover` command reached,
+one different successor, seed once with source id/file backlink and host
+`parentSession`, kickoff admitted and offline successor response received.
+Two faux streams total; loader diagnostics `[]`, extension/runtime errors `[]`.
+A separate manifest-discovery `DefaultResourceLoader` check loaded the package
+with errors `[]` and warnings `[]`. Separate synthetic and pre-integration
+command probes corroborated the 1.5.2 dispatch contract. Fake-API tests cover
+one-shot requests, no historical replay, attribution/lifecycle skips, storage
+and synchronous dispatch failures, cancellation and stale-context error
+propagation. The SDK probe binds replacement directly to `AgentSessionRuntime`;
+it does not exercise the interactive host's fatal replacement-error wrapper. `npm run typecheck` and
+`npm test` passed (781 tests, including 36 Pi fixtures).
+
+This is host integration evidence, not proof that a real model will obey
+notices, write a good handover, or continue correctly. Exact model/settings
+preservation and interactive TUI navigation still need user-run checks.
+
+## Historical 0.73.1 primary sources
 
 `npm view @mariozechner/pi-coding-agent@0.73.1 version repository gitHead --json`
 returned version `0.73.1`, repository `badlogic/pi-mono`, directory
 `packages/coding-agent`, gitHead
-`781152fc24841dc54b22284514604048ebe5e2c9`. The installed CLI reports `0.73.1`.
+`781152fc24841dc54b22284514604048ebe5e2c9`. The then-installed CLI reported `0.73.1`.
 The shipped docs, `dist/` implementations and declarations were inspected;
 source citations below are pinned to that npm gitHead, not moving `main`.
 
@@ -49,13 +134,13 @@ source citations below are pinned to that npm gitHead, not moving `main`.
 | Trusted introduction | `before_agent_start` injects a persistent custom message before the loop [E]. It is not a one-time session-start hook or system-priority guarantee. | Fixture-covered authorship; host persists one intro per user prompt. Model acceptance unverified. |
 | Staged soft limit | Host estimator plus shared stages can drive notices. | Fixed soft, soft x 1.1, soft x 1.2; fixture-covered. No hard gate shipped. |
 | Handover storage | Directly registered tool; `appendEntry` persists custom state outside LLM context [E,T,S]. | Tools observed in real host; model-authored text retention fixture-covered. No standalone external storage or arbitrary-file reader. |
-| Continuation | Only command context exposes `newSession`; setup seeds messages; fresh `withSession` can `sendUserMessage` [E,T,R]. | `/handover` registered in real host; callbacks fixture-covered. Actual replacement and continuation unverified. |
-| Event-driven rollover | No `newSession` in tool/event `ExtensionContext`; command-only restriction prevents deadlocks [E,T]. | Unsupported in this MVP, not an impossibility claim for future APIs. See dispatch discrepancy below. |
+| Continuation | Only command context exposes `newSession`; setup seeds messages; fresh `withSession` can `sendUserMessage` [E,T,R]. | Pi 1.5.2 offline-provider probe observed actual seeded replacement and continuation admission; real-model/interactive continuation unverified. |
+| Event-driven rollover | No `newSession` in tool/event context; command-only restriction prevents deadlocks [E,T]. Current host documents settled-event dispatch into a command. | Pi 1.5.2 real tool -> settled -> `/handover` -> successor path observed. Original 0.73.1 limitation below is historical. |
 | Optional gate | `tool_call` can block; `setActiveTools` changes active declarations [E,T]. | Omitted: advisory-first MVP needs no tool-set restoration or execution gate. |
 | Compaction | Cancel/custom summary hook and disable setting exist [C,E]. | Adapter registers no compaction hooks and changes no settings. Native summarization can still occur. |
 | Native subagents | No core subagent primitive established; shipped example spawns separate Pi processes. | No child identity, native handback or third-party extension integration claimed. |
 
-### Why rollover needs an actual command
+### Historical 0.73.1 dispatch limitation
 
 The pinned extensions guide's tool-to-reload example calls
 `pi.sendUserMessage('/reload-runtime', {deliverAs:'followUp'})` [E]. Source
@@ -66,10 +151,11 @@ An isolated probe observed direct `/inner` executing its command, but
 `/outer` calling `sendUserMessage('/inner', ...)` never executed `/inner` and
 instead reached missing-API-key validation. No model response occurred.
 
-Do not use the guide example to claim automatic rollover, retain an old
-command context for use in events, or queue a slash command as literal model
-input. `/handover` must actually be submitted by the user. After that command,
-seeding and the continuation prompt are automatic, with no extra confirmation.
+That release required the user to submit `/handover`; the original adapter
+therefore shipped manual initiation. Pi 1.5.2 re-establishes actual dispatch
+with explicit `expandPromptTemplates:true` as described above. Do not retain
+an old command context for events or queue a literal slash command as model
+input.
 
 ## Storage and lifecycle limits
 
@@ -95,13 +181,16 @@ seeding and the continuation prompt are automatic, with no extra confirmation.
   It does not force a model selection; Pi owns replacement model resolution.
   Exact active-model/override preservation is not guaranteed by the adapter.
 - Cancellation leaves the source intact. Errors after teardown may leave an
-  open/partially seeded replacement; old-context error notifications can fail.
-  Check the current session, reopen the source and read its stored handover to
-  recover. No retry/idempotency, forward-link, lock or loop guard is promised.
-- A seed above 50% of soft warns only. No fixed generation cap. A returned
-  handover is advisory: the host is not forced to stop the model or sibling tools.
+  open/partially seeded replacement. Recovery guidance is emitted before
+  replacement, and failed stale-context notifications propagate to the host
+  error surface. Check the current session and session list, then reopen the
+  source and read its stored handover to recover. No retry/idempotency,
+  forward-link, lock or loop guard is promised.
+- A seed above 50% of soft warns only. No fixed generation cap. The current
+  tool returns `terminate:true` to settle the agent loop; it does not add an
+  ordinary tool gate or source lock.
 
-## Isolated non-model validation
+## Historical 0.73.1 isolated non-model validation
 
 `ISO`, `REPO`, `PI` and `CLAUDE` below are required absolute inputs: an isolated
 directory, repository directory and installed binaries. All harness state is

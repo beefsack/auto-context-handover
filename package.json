@@ -56,7 +56,7 @@
     "effect": "^4"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "@opencode/plugin": ">=2.2 <3",
     "typebox": "*"
   },
@@ -67,7 +67,7 @@
     "@github/copilot-sdk": "^1",
     "@kilocode/plugin": "^7",
     "@kilocode/sdk": "^7",
-    "@mariozechner/pi-coding-agent": "^0",
+    "@earendil-works/pi-coding-agent": "^1",
     "@opencode/plugin": ">=2.2 <3",
     "@types/node": "22.10.2",
     "typebox": "1.4.3",

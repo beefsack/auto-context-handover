@@ -3,7 +3,7 @@
 Measured soft-limit handover plugin for OpenCode V2 (supports `>=2.2 <3`, assessed against 2.2.5).
 
 Also includes a [Pi root-session adapter](#pi-root-session-adapter) (assessed
-against 0.73.1, manual command rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
+against 1.5.2, automatic root rollover), a [Codex child adapter](#codex-cli-subagent-first-adapter)
 and a [Claude child adapter](#claude-code-subagent-only-adapter), plus a
 [Crush root adapter](#crush-root-session-adapter) and an
 [AiderDesk root adapter](#aiderdesk-root-agent-task-adapter) and a
@@ -437,9 +437,10 @@ must call `createClineHandoverPlugin()` once per session, never reuse an instanc
 
 ## Pi (root-session adapter)
 
-Latest Pi package `@mariozechner/pi-coding-agent` (assessed against 0.73.1) loads `pi/index.ts` directly,
-using the root `package.json` `pi.extensions` manifest. No build or OpenCode
-process is needed. From this repository, run `npm install`, then:
+Latest Pi 1.x (`@earendil-works/pi-coding-agent`, assessed against 1.5.2) loads
+`pi/index.ts` directly using the root `package.json` `pi.extensions` manifest.
+Pi 1.5.2 requires Node >=22.19. No build or OpenCode process is needed.
+From this repository, run `npm install`, then:
 
 ```sh
 pi install /absolute/path/to/auto-context-handover
@@ -470,23 +471,38 @@ pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
   latest active-branch handover plus diagnostics and host source-session/model
   metadata; it cannot read arbitrary files or other sessions. Reload and native
   compaction do not delete these entries. Ephemeral sessions store only in memory.
-- **Rollover needs a user command:** after storage, submit `/handover` with no
-  arguments. It waits for idle, creates a fresh session with a source backlink,
-  seeds the full handover once and automatically sends a next-step continuation
-  prompt using the replacement context. The command does not ask for review.
-  Without stored text it reports an error and makes no model call. Cancellation
-  preserves the source; partial replacement failures require inspecting the
-  current session and recovering from the source's stored handover.
-- No automatic tool/event-driven rollover, lock, hard gate, original-task
-  capture, child lineage or loop guard. No model selection is forced; Pi owns
-  replacement model resolution. Native compaction stays enabled and unchanged.
-  A seed estimate above 50% of soft warns only. Pi owns file retention; there
-  is no adapter quota/eviction policy, and writes are not crash-atomic.
-- Real Pi installation/load/registration is non-model-verified; 28 fake-API
-  tests cover behavior. Model compliance and end-to-end rollover are unverified.
+- **Rollover is automatic by default:** successful tool storage terminates the
+  current agent loop and requests `/handover` dispatch after `agent_settled`.
+  The command waits for idle, creates a fresh session with a source backlink,
+  seeds the full handover once and sends a next-step continuation prompt using
+  only the replacement context. No user typing or confirmation is needed.
+  The interactive host binds its view to that replacement; actual TUI following
+  is source-established, not interactively tested.
+- **Manual fallback:** submit `/handover` with no arguments from the source
+  branch if automatic rollover fails. Stored text is retained. Cancellation
+  leaves the source unchanged. Synchronous dispatch and continuation failures
+  report recovery guidance; asynchronous dispatch errors appear on Pi's error
+  surface, with `/handover` recovery described in the stored tool result.
+  Before replacement, a notice identifies the stored source for recovery.
+  Interactive `newSession` failure is host-fatal: Pi displays the error and
+  exits before the plugin can report again. Relaunch if needed, inspect sessions,
+  then reopen the source for manual recovery. Failed or aborted requests are
+  not automatically retried; reload never replays stored handovers.
+  Without stored text the command reports an error and makes no model call.
+- No lock, hard gate, original-task capture, child lineage or loop guard.
+  Porting the existing chain guard remains pending a lifecycle/state decision.
+  No model selection is forced; Pi owns replacement model resolution. Native
+  compaction stays enabled and unchanged. A seed estimate above 50% of soft warns
+  only. Pi owns file retention; there is no adapter quota/eviction policy, and
+  writes are not crash-atomic.
+- Pi 1.5.2 isolated offline-provider validation observed the real handover tool,
+  settled command dispatch, successor seeding and admitted continuation with
+  zero load errors/warnings. Fake-API regressions cover failures and lifecycle
+  guards. Real-model compliance and interactive end-to-end behavior remain
+  unverified.
 
-Pinned contracts, command-dispatch caveat, checklist and reproducible non-model
-checks: [Pi assessment](docs/research/pi.md).
+Current contracts, historical dispatch limitation and non-model evidence:
+[Pi assessment](docs/research/pi.md).
 
 ## Codex CLI (subagent-first adapter)
 

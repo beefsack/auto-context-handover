@@ -1,15 +1,15 @@
-// auto-context-handover: Pi root-session extension (MVP, no build step).
+// auto-context-handover: Pi root-session extension (no build step).
 // Root sessions only: measured soft-limit advisories, a model-written
-// handover kept in extension storage, and manual /handover continuation.
-// No subagent integration, no automatic rollover, no hard gate, no lock,
-// no compaction changes. Native Pi compaction is untouched.
+// handover kept in extension storage, and automatic rollover after the
+// storing turn settles. /handover remains the manual fallback.
+// No subagent integration, no hard gate, no lock, no compaction changes.
 //
 // Persistence note: pi.appendEntry() writes a session custom entry, which
 // does NOT participate in LLM context. It is durable only when the session
 // itself is backed by a session file; ephemeral sessions (no session file)
 // hold it in memory only. Tool and command text say so honestly.
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseThreshold, type ThresholdSpec } from "../source/shared/threshold.ts";
 import { resolveSoftTokens } from "../source/measure.ts";
@@ -42,6 +42,28 @@ interface CallDiag {
   readonly stage: string;
   readonly estimate: DiagValue;
   readonly soft: DiagValue;
+}
+
+// In-memory only: a reload never replays a handover stored in a past session.
+// The request is scoped to the storing run/session/branch and consumed once.
+interface PendingRoll {
+  readonly run: number;
+  readonly sessionId: string;
+  readonly sessionFile: string | undefined;
+  readonly handoverEntryId: string | undefined;
+}
+
+const recoveryHint = (sessionId: string): string =>
+  `The handover stays stored in session ${sessionId}; run /handover from that session to continue manually.`;
+
+function reportHostError(ctx: ExtensionContext, message: string, cause?: unknown): void {
+  try {
+    ctx.ui.notify(message, "error");
+  } catch (notifyError) {
+    throw new Error(`${message} (notification failed: ${(notifyError as Error).message})`, {
+      cause: cause ?? notifyError,
+    });
+  }
 }
 
 interface StoredHandover {
@@ -83,9 +105,9 @@ const TOOL_DESCRIPTION =
   `Pass the FULL handover text VERBATIM in "handover" (it is stored and replayed word for word, never summarized or reworded) ` +
   `plus a short status/outcome/next-step summary in "summary".\n\n` +
   `${PI_HANDOVER_SECTIONS}\n\n` +
-  `Once stored, end your turn; the user runs /handover to continue in a fresh session seeded from this text. ` +
-  `Calling this tool again later after resumed work replaces the stored handover. ` +
-  `No automatic rollover is triggered by this call. Do not paste secrets.`;
+  `Once stored, end your turn: a fresh session is opened automatically after this turn settles, seeded from this text, ` +
+  `and a continuation prompt is sent there. If that does not happen, the user can run /handover instead. ` +
+  `Calling this tool again later after resumed work replaces the stored handover. Do not paste secrets.`;
 
 const READ_DESCRIPTION =
   `Read the handover stored in the current session branch. ` +
@@ -98,8 +120,8 @@ const INTRO_TEXT =
   `it replaces any required final report or current-step wrap-up instruction for that step, not the whole task. ` +
   `When an advisory appears, finish the current step, then call the context_handover tool with the full handover text; ` +
   `the tool writes only extension storage, so read-only task instructions still allow the call. ` +
-  `Continuation is manual by default: the user runs /handover to open a fresh session seeded from the stored handover. ` +
-  `Nothing rolls over automatically.`;
+  `After you store a handover and end your turn, continuation is automatic: the session rolls over into a fresh ` +
+  `session seeded from the stored handover. /handover remains available as a manual fallback if automatic rollover fails.`;
 
 // Stable per-stage notice suffix. No live numbers: the text is identical on
 // every request that observes the same stage.
@@ -107,7 +129,8 @@ const NOTICE_SUFFIX =
   ` This advisory applies to the current step only: it replaces any required final report or current-step wrap-up for this step, ` +
   `not the whole task (see the auto-context-handover intro message for the full workflow). ` +
   `When done with this step, call the context_handover tool with the full handover text ` +
-  `(extension-storage write only, allowed under read-only instructions); the user then runs /handover to continue manually.`;
+  `(extension-storage write only, allowed under read-only instructions); rollover follows automatically once the turn settles, ` +
+  `with /handover as the fallback.`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -201,6 +224,12 @@ export default function (pi: ExtensionAPI): void {
   // Latest observed estimate per session id. Lost on extension reload, so a
   // tool call after reload honestly reports unknown diagnostics.
   const diagBySession = new Map<string, CallDiag>();
+  let run = 0;
+  let pending: PendingRoll | undefined;
+
+  pi.on("agent_start", () => {
+    run += 1;
+  });
 
   pi.registerFlag(FLAG_NAME, {
     description:
@@ -255,7 +284,49 @@ export default function (pi: ExtensionAPI): void {
     }
   });
 
+  // A pending rollover belongs to one run on one branch. Switching,
+  // forking or navigating away drops it; the stored text is untouched.
+  pi.on("session_before_switch", () => {
+    pending = undefined;
+  });
+  pi.on("session_before_fork", () => {
+    pending = undefined;
+  });
+  pi.on("session_before_tree", () => {
+    pending = undefined;
+  });
+
+  pi.on("agent_settled", (event, ctx) => {
+    const request = pending;
+    pending = undefined;
+    if (!request || event.aborted) return;
+    try {
+      if (
+        request.run !== run ||
+        ctx.sessionManager.getSessionId() !== request.sessionId ||
+        ctx.sessionManager.getSessionFile() !== request.sessionFile ||
+        request.handoverEntryId === undefined ||
+        !ctx.sessionManager.getBranch().some((entry) => entry.id === request.handoverEntryId)
+      ) {
+        return;
+      }
+    } catch {
+      // Cannot confirm the original branch: never replay on an unknown target.
+      return;
+    }
+    try {
+      pi.sendUserMessage(`/${COMMAND_NAME}`, { expandPromptTemplates: true });
+    } catch (error) {
+      reportHostError(
+        ctx,
+        `auto-context-handover: automatic rollover dispatch failed; ${recoveryHint(request.sessionId)} ${(error as Error).message}`,
+        error,
+      );
+    }
+  });
+
   pi.on("session_shutdown", async (_event, ctx) => {
+    pending = undefined;
     try {
       diagBySession.delete(ctx.sessionManager.getSessionId());
     } catch {
@@ -308,14 +379,22 @@ export default function (pi: ExtensionAPI): void {
           `auto-context-handover: failed to store handover, nothing was handed over: ${(error as Error).message}`,
         );
       }
+      // Only a successful storage creates a rollover request. A reload or an
+      // older handover entry never starts one on its own.
+      pending = {
+        run,
+        sessionId,
+        sessionFile: ctx.sessionManager.getSessionFile(),
+        handoverEntryId: ctx.sessionManager.getLeafId() ?? undefined,
+      };
       const ephemeral = ctx.sessionManager.getSessionFile() === undefined;
       const text =
-        `Handover stored for session ${sessionId}. End your turn now; the user runs /handover to continue in a fresh session. ` +
-        `No automatic rollover was triggered.` +
+        `Handover stored for session ${sessionId}. End your turn now; a fresh seeded session opens automatically once this turn settles. ` +
+        `If it does not, run /handover from this session.` +
         (ephemeral
           ? ` Note: this session has no session file, so the handover is held in memory only and will not survive a restart.`
           : ``);
-      return { content: [{ type: "text", text }], details: { sessionId, stored: true } };
+      return { content: [{ type: "text", text }], details: { sessionId, stored: true }, terminate: true };
     },
   });
 
@@ -349,7 +428,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand(COMMAND_NAME, {
-    description: "Continue the stored session handover in a fresh session. Requires a stored handover; takes no arguments.",
+    description: "Manual fallback: continue the stored session handover in a fresh session. Requires a stored handover; takes no arguments.",
     handler: async (args, ctx) => {
       if (args.trim().length > 0) {
         ctx.ui.notify("auto-context-handover: /handover takes no arguments", "error");
@@ -417,6 +496,12 @@ export default function (pi: ExtensionAPI): void {
           "warning",
         );
       }
+      // Preflight guidance: replacement is destructive to the live view, so
+      // state plainly that the model-written source remains recoverable.
+      ctx.ui.notify(
+        `auto-context-handover: replacing this session with a seeded successor. ${recoveryHint(sourceId)}`,
+        "info",
+      );
       try {
         const result = await ctx.newSession({
           ...(parentSession === undefined ? {} : { parentSession }),
@@ -435,31 +520,31 @@ export default function (pi: ExtensionAPI): void {
             try {
               await fresh.sendUserMessage(kickoff);
             } catch (error) {
-              fresh.ui.notify(
-                `auto-context-handover: the replacement session is open but the continuation prompt failed: ${(error as Error).message}`,
-                "error",
+              reportHostError(
+                fresh,
+                `auto-context-handover: the replacement session is open but the continuation prompt failed; ${recoveryHint(sourceId)} ${(error as Error).message}`,
+                error,
               );
             }
           },
         });
         if (result.cancelled) {
-          ctx.ui.notify("auto-context-handover: handover continuation cancelled; the source session is unchanged", "info");
+          ctx.ui.notify(
+            `auto-context-handover: handover continuation cancelled; the source session is unchanged. ${recoveryHint(sourceId)}`,
+            "info",
+          );
         }
         // Success needs no report here: the replacement session is live and
         // the kickoff message speaks for itself. Never claim success on error.
       } catch (error) {
-        // The old context may be torn down already, so this report cannot
-        // confirm the source state; a best-effort notify is all that is left.
-        try {
-          ctx.ui.notify(
-            `auto-context-handover: handover continuation failed: ${(error as Error).message}. ` +
-              `The old context may be torn down, so the source state and any partial replacement cannot be confirmed here; ` +
-              `check the session list and retry /handover from the session that holds the stored handover.`,
-            "error",
-          );
-        } catch {
-          // The source context may be stale after a partial replacement.
-        }
+        // The old context may be torn down already. If it cannot carry the
+        // error, throw so the host extension-error surface still reports it.
+        reportHostError(
+          ctx,
+          `auto-context-handover: handover continuation failed: ${(error as Error).message}. ` +
+            `${recoveryHint(sourceId)} The old context may be torn down, so the source state and any partial replacement cannot be confirmed here; check the session list.`,
+          error,
+        );
       }
     },
   });

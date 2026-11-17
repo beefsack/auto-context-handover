@@ -17,6 +17,7 @@ interface FakeSessionManager {
   branch: Array<Record<string, unknown>>;
   sessionId: string;
   sessionFile: string | undefined;
+  leafId: string | null;
   failBranch: boolean;
   getBranchCalls: number;
 }
@@ -35,6 +36,7 @@ function createSessionManager(overrides: Partial<FakeSessionManager> = {}): Fake
     branch: [],
     sessionId: "sess-1",
     sessionFile: "/sessions/sess-1.jsonl",
+    leafId: "leaf-initial",
     failBranch: false,
     getBranchCalls: 0,
     ...overrides,
@@ -47,8 +49,11 @@ interface FakePi {
   commands: Map<string, any>;
   flags: Map<string, any>;
   flagValues: Record<string, string | boolean | undefined>;
-  appended: Array<{ customType: string; data: unknown }>;
+  appended: Array<{ id: string; customType: string; data: unknown }>;
+  currentSession: FakeSessionManager | undefined;
+  leafCounter: number;
   failAppend: boolean;
+  failSend: boolean;
   sentUserMessages: unknown[];
   setModels: unknown[];
   notified: RecordedNotify[];
@@ -63,7 +68,10 @@ function createFakePi(): FakePi {
     flags: new Map(),
     flagValues: {},
     appended: [],
+    currentSession: undefined,
+    leafCounter: 0,
     failAppend: false,
+    failSend: false,
     sentUserMessages: [],
     setModels: [],
     notified: [],
@@ -88,9 +96,23 @@ function createFakePi(): FakePi {
     getFlag: (name: string) => fake.flagValues[name],
     appendEntry: (customType: string, data?: unknown) => {
       if (fake.failAppend) throw new Error("append boom");
-      fake.appended.push({ customType, data });
+      const id = `leaf-${++fake.leafCounter}`;
+      fake.appended.push({ id, customType, data });
+      const session = fake.currentSession;
+      if (session) {
+        session.branch.push({
+          type: "custom",
+          id,
+          parentId: session.leafId,
+          timestamp: new Date().toISOString(),
+          customType,
+          data,
+        });
+        session.leafId = id;
+      }
     },
     sendUserMessage: (...args: unknown[]) => {
+      if (fake.failSend) throw new Error("dispatch boom");
       fake.sentUserMessages.push(args);
     },
     setModel: (...args: unknown[]) => {
@@ -108,19 +130,23 @@ function createFakePi(): FakePi {
 }
 
 interface FakeCtxOptions {
+  fake?: FakePi;
   session?: FakeSessionManager;
   usage?: { tokens: unknown; contextWindow: unknown } | undefined | (() => unknown);
   model?: { provider: string; id: string } | undefined;
   notified?: RecordedNotify[];
+  notifyThrows?: boolean;
 }
 
 function createToolCtx(options: FakeCtxOptions = {}): any {
   const session = options.session ?? createSessionManager();
   const usage = options.usage;
+  if (options.fake) options.fake.currentSession = session;
   return {
     sessionManager: {
       getSessionId: () => session.sessionId,
       getSessionFile: () => session.sessionFile,
+      getLeafId: () => session.leafId,
       getBranch: () => {
         session.getBranchCalls += 1;
         if (session.failBranch) throw new Error("branch boom");
@@ -138,6 +164,7 @@ function createToolCtx(options: FakeCtxOptions = {}): any {
     ui: {
       notify: (message: string, level?: string) => {
         options.notified?.push({ message, level: level ?? "info" });
+        if (options.notifyThrows) throw new Error("stale ctx");
       },
     },
   };
@@ -163,6 +190,9 @@ describe("pi registration", () => {
     assert.ok(fake.commands.has("handover"));
     assert.ok(fake.flags.has("handover-soft"));
     assert.equal(fake.flags.get("handover-soft").type, "string");
+    const description = fake.tools.get("context_handover").description as string;
+    assert.ok(description.includes("automatically"));
+    assert.ok(!/manual by default|No automatic rollover|user runs \/handover to continue manually/i.test(description));
     assert.deepEqual(fake.appended, []);
     assert.deepEqual(fake.sentUserMessages, []);
     assert.deepEqual(fake.setModels, []);
@@ -181,6 +211,7 @@ describe("pi registration", () => {
     assert.equal(typeof message.customType, "string");
     assert.ok((message.content as string).includes("context_handover"));
     assert.ok((message.content as string).includes("/handover"));
+    assert.ok((message.content as string).includes("automatic"));
     assert.ok((message.content as string).includes("current step"));
     assert.deepEqual(fake.appended, []);
     assert.deepEqual(fake.sentUserMessages, []);
@@ -194,6 +225,7 @@ describe("pi registration", () => {
     const last = (result as any).messages.at(-1);
     assert.ok((last.content as string).includes("auto-context-handover intro"));
     assert.ok((last.content as string).includes("current step"));
+    assert.ok((last.content as string).includes("rollover follows automatically"));
   });
 });
 
@@ -339,8 +371,9 @@ describe("pi handover tool", () => {
     assert.deepEqual(data.diag, { reason: "nudged", stage: "warn1", estimate: 150000, soft: 140000 });
     const text = (result.content[0] as { text: string }).text;
     assert.ok(text.includes("End your turn"));
+    assert.ok(text.includes("automatically once this turn settles"));
     assert.ok(text.includes("/handover"));
-    assert.equal(result.terminate, undefined);
+    assert.equal(result.terminate, true);
   });
 
   it("records not-nudged diagnostics when under threshold and unknown after reload", async () => {
@@ -448,6 +481,7 @@ describe("pi /handover command", () => {
     onWait?: () => void;
     waitThrows: boolean;
     setupThrows: boolean;
+    notifyThrowsOnError: boolean;
     newSessionCalls: any[];
     newSessionBehavior: "ok" | "cancel" | "throw";
     ctx: any;
@@ -463,6 +497,7 @@ describe("pi /handover command", () => {
       waited: false,
       waitThrows: false,
       setupThrows: false,
+      notifyThrowsOnError: false,
       newSessionCalls: [],
       newSessionBehavior: "ok",
       ctx: undefined,
@@ -491,6 +526,7 @@ describe("pi /handover command", () => {
       ui: {
         notify: (message: string, level?: "info" | "warning" | "error") => {
           h.notified.push({ message, level: level ?? "info" });
+          if (h.notifyThrowsOnError && level === "error") throw new Error("stale source ctx");
         },
       },
       newSession: async (options: any) => {
@@ -534,6 +570,11 @@ describe("pi /handover command", () => {
     await h.fake.commands.get("handover").handler("", h.ctx);
     assert.equal(h.waited, true);
     assert.equal(h.newSessionCalls.length, 1);
+    assert.ok(
+      h.notified.some(
+        (n) => n.level === "info" && n.message.includes("replacing this session") && n.message.includes("/handover"),
+      ),
+    );
     const options = h.newSessionCalls[0];
     assert.equal(options.parentSession, "/sessions/sess-1.jsonl");
 
@@ -696,5 +737,181 @@ describe("pi /handover command", () => {
       },
     });
     assert.ok(freshNotifies.some((n) => n.level === "error" && n.message.includes("continuation prompt failed")));
+  });
+
+  it("throws a clear host error when a stale source ctx cannot carry a replacement failure", async () => {
+    const h = harness([payload("body")]);
+    h.notifyThrowsOnError = true;
+    h.newSessionBehavior = "throw";
+    await assert.rejects(
+      () => h.fake.commands.get("handover").handler("", h.ctx),
+      /handover continuation failed[\s\S]*run \/handover[\s\S]*stale source ctx/,
+    );
+  });
+
+  it("throws a clear host error when a stale fresh ctx cannot carry a continuation failure", async () => {
+    const h = harness([payload("body")]);
+    await h.fake.commands.get("handover").handler("", h.ctx);
+    const options = h.newSessionCalls[0];
+    await assert.rejects(
+      () =>
+        options.withSession({
+          sendUserMessage: async () => {
+            throw new Error("kickoff boom");
+          },
+          ui: {
+            notify: () => {
+              throw new Error("stale fresh ctx");
+            },
+          },
+        }),
+      /continuation prompt failed[\s\S]*run \/handover[\s\S]*stale fresh ctx/,
+    );
+  });
+});
+
+describe("pi automatic rollover", () => {
+  const setup = (overrides: Partial<FakeSessionManager> = {}, notifyThrows = false) => {
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const session = createSessionManager(overrides);
+    const notified: RecordedNotify[] = [];
+    const ctx = createToolCtx({ fake, session, notified, notifyThrows });
+    return { fake, session, notified, ctx };
+  };
+
+  const start = async (fake: FakePi, ctx: any): Promise<void> => {
+    await emit(fake, "agent_start", { type: "agent_start" }, ctx);
+  };
+
+  const store = async (fake: FakePi, ctx: any, handover = "automatic body", summary = "automatic summary"): Promise<any> =>
+    fake.tools.get("context_handover").execute("t1", { handover, summary }, undefined, undefined, ctx);
+
+  const settle = async (fake: FakePi, ctx: any, aborted = false): Promise<void> => {
+    await emit(fake, "agent_settled", { type: "agent_settled", aborted }, ctx);
+  };
+
+  it("dispatches the registered command once with expansion after successful storage and settlement", async () => {
+    const { fake, ctx, notified } = setup();
+    await start(fake, ctx);
+    const result = await store(fake, ctx);
+    assert.equal(result.terminate, true);
+    assert.equal(fake.sentUserMessages.length, 0);
+
+    await settle(fake, ctx);
+    assert.deepEqual(fake.sentUserMessages, [["/handover", { expandPromptTemplates: true }]]);
+    assert.ok(!notified.some((n) => n.level === "error"));
+
+    await settle(fake, ctx);
+    assert.equal(fake.sentUserMessages.length, 1);
+  });
+
+  it("never replays a historical handover or a readback", async () => {
+    const { fake, session, ctx } = setup();
+    await settle(fake, ctx);
+    session.branch.push({
+      type: "custom",
+      id: "historic",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      customType: ENTRY_TYPE,
+      data: {
+        handover: "old body",
+        summary: "old",
+        sessionId: "sess-1",
+        model: { provider: "p", id: "m" },
+        storedAt: 1,
+        diag: { reason: "unknown", stage: "unknown", estimate: "unknown", soft: "unknown" },
+      },
+    });
+    await settle(fake, ctx);
+    await fake.tools.get("read_handover").execute("t2", {}, undefined, undefined, ctx);
+    await settle(fake, ctx);
+    assert.deepEqual(fake.sentUserMessages, []);
+  });
+
+  it("does not queue an automatic rollover when storage fails", async () => {
+    const { fake, ctx } = setup();
+    await start(fake, ctx);
+    fake.failAppend = true;
+    await assert.rejects(() => store(fake, ctx), /failed to store handover/);
+    fake.failAppend = false;
+    await settle(fake, ctx);
+    assert.deepEqual(fake.sentUserMessages, []);
+  });
+
+  it("skips replay when session, branch, run or lifecycle no longer matches", async () => {
+    const sessionMismatch = setup();
+    await start(sessionMismatch.fake, sessionMismatch.ctx);
+    await store(sessionMismatch.fake, sessionMismatch.ctx);
+    const otherCtx = createToolCtx({
+      fake: sessionMismatch.fake,
+      session: createSessionManager({ sessionId: "sess-other" }),
+    });
+    await settle(sessionMismatch.fake, otherCtx);
+    assert.deepEqual(sessionMismatch.fake.sentUserMessages, []);
+
+    const branchMismatch = setup();
+    await start(branchMismatch.fake, branchMismatch.ctx);
+    await store(branchMismatch.fake, branchMismatch.ctx);
+    branchMismatch.session.branch = [];
+    await settle(branchMismatch.fake, branchMismatch.ctx);
+    assert.deepEqual(branchMismatch.fake.sentUserMessages, []);
+
+    const runMismatch = setup();
+    await start(runMismatch.fake, runMismatch.ctx);
+    await store(runMismatch.fake, runMismatch.ctx);
+    await start(runMismatch.fake, runMismatch.ctx);
+    await settle(runMismatch.fake, runMismatch.ctx);
+    assert.deepEqual(runMismatch.fake.sentUserMessages, []);
+
+    const shutdown = setup();
+    await start(shutdown.fake, shutdown.ctx);
+    await store(shutdown.fake, shutdown.ctx);
+    await emit(shutdown.fake, "session_shutdown", { type: "session_shutdown", reason: "quit" }, shutdown.ctx);
+    await settle(shutdown.fake, shutdown.ctx);
+    assert.deepEqual(shutdown.fake.sentUserMessages, []);
+  });
+
+  it("keeps the latest repeated store single-use and never retries after abort", async () => {
+    const repeats = setup();
+    await start(repeats.fake, repeats.ctx);
+    await store(repeats.fake, repeats.ctx, "first body");
+    await store(repeats.fake, repeats.ctx, "second body");
+    await settle(repeats.fake, repeats.ctx);
+    assert.equal(repeats.fake.sentUserMessages.length, 1);
+
+    const aborted = setup();
+    await start(aborted.fake, aborted.ctx);
+    await store(aborted.fake, aborted.ctx);
+    await settle(aborted.fake, aborted.ctx, true);
+    await settle(aborted.fake, aborted.ctx);
+    assert.deepEqual(aborted.fake.sentUserMessages, []);
+  });
+
+  it("reports synchronous dispatch failure with source recovery guidance, including stale ctx", async () => {
+    const { fake, ctx, notified } = setup();
+    await start(fake, ctx);
+    await store(fake, ctx);
+    fake.failSend = true;
+    await settle(fake, ctx);
+    assert.ok(
+      notified.some(
+        (n) =>
+          n.level === "error" &&
+          n.message.includes("automatic rollover dispatch failed") &&
+          n.message.includes("sess-1") &&
+          n.message.includes("run /handover"),
+      ),
+    );
+
+    const stale = setup({}, true);
+    await start(stale.fake, stale.ctx);
+    await store(stale.fake, stale.ctx);
+    stale.fake.failSend = true;
+    await assert.rejects(
+      () => settle(stale.fake, stale.ctx),
+      /automatic rollover dispatch failed[\s\S]*run \/handover[\s\S]*stale ctx/,
+    );
   });
 });

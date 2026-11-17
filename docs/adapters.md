@@ -35,9 +35,10 @@ Lost transient diagnostics remain `unknown`; durable closure locks survive.
 
 ## Pi root-session MVP
 
-Pi `0.73.1`, pinned source and observed CLI evidence:
+Pi `1.5.2`, assessed host and isolated offline-provider evidence:
 [Pi assessment](research/pi.md). **Fixture-covered** below never means model
-compliance; only installation/load/registration was observed in the real host.
+compliance. Real tool-triggered dispatch, seeded replacement and continuation
+admission were observed without network or real-model calls.
 The root-only scope is deliberate: Pi has no core child primitive.
 
 | # | Pi status against the requirement above |
@@ -46,12 +47,12 @@ The root-only scope is deliberate: Pi has no core child primitive.
 | 2 | n/a deferred loader: tools register directly. Both tools and `/handover` observed in the real CLI. Allowlists may still disable them. |
 | 3 | Intro/notices define the current step (not entire task), replace that session's final report and permit plugin-storage writes in read-only work. Fixture-covered guidance only. |
 | 4 | Shared fixed stages soft, soft x 1.1, soft x 1.2. Host estimator and known window, capped integer/default soft and explicit percentages. Unknown usage fails open. Fixture-covered; hard gate absent. |
-| 5 | Partial: user must submit `/handover`; thereafter seeding and continuation prompt are automatic. No event/tool-driven replacement; no parent preauthorization claimed. |
+| 5 | Automatic by default: tool storage requests settled-event command dispatch, then `/handover` creates/seeds a successor and sends continuation via fresh context. Manual command remains fallback. Pi 1.5.2 offline-provider probe observed the full path; real-model compliance unverified. |
 | 6 | n/a child replacement/type/count rules. Host owns new-root model resolution; adapter does not select a model or promise override preservation. |
-| 7 | n/a native child handback. Root tool stores text and advises ending the turn. Stop/final-message compliance unverified, not intercepted. |
-| 8 | n/a child delivery fallback. Root has no lock/never-resume enforcement. Stored handover can be read on the source branch; partial replacement failure recovery is manual. |
+| 7 | n/a native child handback. Root tool stores text and returns `terminate:true` to end the agent loop before settled-event rollover. Real-model handover authorship/compliance remains unverified. |
+| 8 | n/a child delivery fallback. Root has no lock/never-resume enforcement. Dispatch/replacement/continuation errors give source recovery guidance; cancelled replacement leaves source unchanged. Stored handover remains on source branch; uncertain partial effects require inspecting sessions before manual recovery. No automatic retry or historical replay. |
 | 9 | Root full seed once plus source id/file backlink and host `parentSession`; no reference reader across sessions, original-task capture or child lineage. Shared no-repeat/title-based framing fixture-covered. |
-| 10 | Seed >50% of soft warns only; no fixed chain cap or growth classification. Model text stays verbatim. Original-task-once child rule n/a. |
+| 10 | Seed >50% of soft warns only; no chain cap or growth classification. Existing OpenCode guard parameters are reusable, but Pi predecessor/pre-call/high-water state and stop semantics need a decision before porting. Model text stays verbatim. Original-task-once child rule n/a. |
 | 11 | Session custom entries in Pi-owned JSONL; active-branch latest lookup; no quota/eviction policy. Ephemeral sessions memory-only; host writes nontransactional. Diagnostics from latest request hook, unknown after reload; fixture-covered. |
 | 12 | n/a parent/successor split. Current-branch-only reader takes no target arguments. Source session/effective model are recorded by the host-facing tool, not authored provenance; no model-override claim. Successor receives full seed. |
 
@@ -297,8 +298,9 @@ targeting. [Unblock conditions](research/kiro-cli.md#blockers-and-unblock-path).
 
 - OpenCode intentionally differs: no trusted start intro, no native handback, no per-child lineage or growth metadata and no parent preauthorization. Child reply text states logical replacement under count limits and permits stall/growth check-ins; those are advisory instructions, not new mechanisms.
 - Claude Code intentionally differs: roots are context-only (no measurement, nudging, handover action, gating or rollover); native compaction is unchanged.
-- Pi intentionally differs: root-oriented advisory workflow and manual command
-  rollover; no core subagent integration or automatic event-driven replacement.
+- Pi intentionally differs: root-oriented advisory workflow with automatic
+  settled-event command rollover and manual `/handover` fallback; no core
+  subagent integration, lock or chain guard.
 - Codex intentionally differs: source-pinned observer plus tool-boundary notices,
   hook-bound MCP calls and file storage; no original-task capture, child lineage,
   requested-override observation or automatic parent spawning.
