@@ -34,7 +34,7 @@ Non-OpenCode adapters have no hard token gate; live model compliance remains unv
 | [Codex CLI](#codex-cli-subagent-first-adapter) | Supported | Subagent-first | Undocumented source-only `PostModelRequest`; integer-only uncapped soft, live untested |
 | [GitHub Copilot CLI](#github-copilot-cli-subagent-first-adapter) | Supported | Child-first | Experimental extension API, live untested; general-purpose children lack lifecycle hooks |
 | [Cline CLI/SDK](#cline-clisdk-root-adapter) | Supported | Root advisory; manual continuation | Chars/4 estimate; VS Code extension unsupported, live untested |
-| [Pi](#pi-root-session-adapter) | Supported | Root; user `/handover`, then automatic seeded successor | No subagent support; live untested |
+| [Pi](#pi-root-session-adapter) | Supported | Root automatic seeded successor; child read-then-replace | Heuristic child detection; new lifecycle behavior live untested |
 | [Kilo](#kilo-root-session-adapter) | Supported | Root advisory; manual continuation | Experimental transform hook; extension runtime unverified, live untested |
 | [AiderDesk](#aiderdesk-root-agent-task-adapter) | WIP/untested | Root Agent mode; manual continuation | Automatic fresh-task initialization unverified |
 | [Amp](#amp-focused-root-adapter) | WIP/untested | Focused root; automatic successor thread | No chain cap |
@@ -453,8 +453,17 @@ For a single launch without package installation:
 pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
 ```
 
-- Root-oriented only: no integration with third-party Pi subagent extensions.
-  Pi has no core subagent primitive. Tools register directly, with no loader.
+- Top-level sessions roll over automatically; detected children return a
+  continuation reply for their parent to read and replace manually. Pi has no
+  core child identity API. The adapter recognizes pi-subagents' host-built
+  `<active_agent name="..."/>` system-prompt marker or `PI_SUBAGENT_CHILD=1`.
+  UI mode and `parentSession` are not identity signals: print/JSON roots and
+  SDK children both lack dialog UI, and top-level successors also have
+  predecessor links.
+  This is a compatibility heuristic, not a generic child guarantee: missing
+  markers can misclassify other SDK children as roots; forged or inherited
+  markers can suppress automatic root rollover. No pi-subagents or
+  configuration changes are required. Tools register directly, with no loader.
 - A `before_agent_start` introduction explains the installed workflow before
   each loop. Pi persists this custom message per user prompt; it is not a
   system-prefix rewrite or a system-priority guarantee. Every provider-request
@@ -467,19 +476,35 @@ pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
   than silently substituting a threshold. Measurement uses Pi's own estimator.
 - The active model calls `context_handover({handover, summary})` after a notice
   or an explicit user request, not ordinary task completion. Both strings are
-  stored verbatim as a session custom entry. `read_handover({})` returns the
-  latest active-branch handover plus diagnostics and host source-session/model
-  metadata; it cannot read arbitrary files or other sessions. Reload and native
-  compaction do not delete these entries. Ephemeral sessions store only in memory.
-- **Rollover is automatic by default:** successful tool storage terminates the
+  stored verbatim as a session custom entry and in a private shared store under
+  `join(getAgentDir(), "auto-context-handover")`. One SHA-256-named JSON file per
+  host-derived session ID, directory mode 0700/file mode 0600, atomic rename;
+  memory-only child handovers survive session disposal. No TTL, quota or
+  automatic eviction; each ID retains its latest shared handover until removed.
+  Crash-leftover temporary files may remain; no fsync durability promise or
+  same-user filesystem sandbox. Failed publication requests no continuation;
+  a branch entry may already exist.
+  `read_handover({"sessionID":"predecessor-id"})` reads any retained session by
+  ID, never a filesystem path. `read_handover({})` retains the latest-active-branch
+  behavior for compatibility. Both include diagnostics and host source/model
+  metadata. The shared ID reader is latest-per-session, not branch-specific.
+- **Root rollover is automatic by default:** successful tool storage terminates the
   current agent loop and requests `/handover` dispatch after `agent_settled`.
   The command waits for idle, creates a fresh session with a source backlink,
   seeds the full handover once and sends a next-step continuation prompt using
-  only the replacement context. No user typing or confirmation is needed.
-  The interactive host binds its view to that replacement; actual TUI following
+  only the replacement context. The predecessor's current provider/model and
+  thinking level are snapshotted before replacement, restored once by the new
+  extension's `session_start` (`setModel`, then `setThinkingLevel`), and verified
+  before kickoff. Missing models, authentication failures or mismatches report
+  an error and withhold kickoff rather than continuing on a default model.
+  Resume/reload never replays this selection. No user typing or confirmation
+  is needed. The interactive host binds its view to that replacement; actual TUI following
   is source-established, not interactively tested.
 - **Manual fallback:** submit `/handover` with no arguments from the source
-  branch if automatic rollover fails. Stored text is retained. Cancellation
+  branch if automatic rollover fails. A user-issued command bypasses child
+  classification and stored closure, so even a mislabeled root can recover;
+  fresh-instance model/thinking restoration still applies. It reads the branch
+  directly, independently of shared-store corruption. Stored text is retained. Cancellation
   leaves the source unchanged. Synchronous dispatch and continuation failures
   report recovery guidance; asynchronous dispatch errors appear on Pi's error
   surface, with `/handover` recovery described in the stored tool result.
@@ -489,17 +514,30 @@ pi -e /absolute/path/to/auto-context-handover/pi/index.ts --handover-soft '70%'
   then reopen the source for manual recovery. Failed or aborted requests are
   not automatically retried; reload never replays stored handovers.
   Without stored text the command reports an error and makes no model call.
-- No lock, hard gate, original-task capture, child lineage or loop guard.
+- **Children never auto-roll over or create sessions:** the writer does not
+  return `terminate:true`; it instructs the child to send an exact final reply
+  containing the summary, predecessor ID and `read_handover({"sessionID":...})`.
+  The parent reads the full text, then spawns a same-type replacement with its
+  own steering/model choices and a reference-only prompt directing full readback
+  and continuation from "Prioritized next steps". The shared record closes the
+  predecessor to later tool calls and repeated writes, including after reload;
+  the next turn repeats final-reply guidance. Unreadable/corrupt shared state
+  retains known branch closure and fails closed for classified children. An
+  otherwise open root warns once but keeps tools, branch readback and manual
+  recovery available; a fresh write can repair corrupt shared JSON. This
+  completion phase is model-guided, not a guaranteed native final-message delivery or
+  hard session-stop boundary. Child `--handover-soft` propagation is not provided.
+- No hard token gate, original-task capture, child lineage or loop guard.
   Porting the existing chain guard remains pending a lifecycle/state decision.
-  No model selection is forced; Pi owns replacement model resolution. Native
-  compaction stays enabled and unchanged. A seed estimate above 50% of soft warns
-  only. Pi owns file retention; there is no adapter quota/eviction policy, and
-  writes are not crash-atomic.
+  Native compaction stays enabled and unchanged. A seed estimate above 50% of
+  soft warns only.
 - Pi 1.5.2 isolated offline-provider validation observed the real handover tool,
   settled command dispatch, successor seeding and admitted continuation with
   zero load errors/warnings. Fake-API regressions cover failures and lifecycle
-  guards. Real-model compliance and interactive end-to-end behavior remain
-  unverified.
+  guards, shared child readback/closure and fresh-instance model restoration.
+  The new model-preservation and child paths have fixture coverage only;
+  real-model final-reply delivery, manual child replacement and interactive
+  end-to-end behavior remain unverified.
 
 Current contracts, historical dispatch limitation and non-model evidence:
 [Pi assessment](docs/research/pi.md).

@@ -1,6 +1,26 @@
 // Pi adapter fixtures: fake ExtensionAPI capturing hooks/tools/commands/flags.
 // No host, no network, no model calls.
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import { mkdtemp, rm, readFile, stat, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+
+let agentDirectory: string;
+const originalAgentDirectory = process.env.PI_CODING_AGENT_DIR;
+const originalChildFlag = process.env.PI_SUBAGENT_CHILD;
+beforeEach(async () => {
+  agentDirectory = await mkdtemp(join(tmpdir(), "handover-pi-"));
+  process.env.PI_CODING_AGENT_DIR = agentDirectory;
+  delete process.env.PI_SUBAGENT_CHILD;
+});
+afterEach(async () => {
+  await rm(agentDirectory, { recursive: true, force: true });
+  if (originalChildFlag === undefined) delete process.env.PI_SUBAGENT_CHILD;
+  else process.env.PI_SUBAGENT_CHILD = originalChildFlag;
+  if (originalAgentDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalAgentDirectory;
+});
 import assert from "node:assert/strict";
 import createExtension from "./index.ts";
 import { openCodeStageText } from "../source/shared/handover-text.ts";
@@ -56,6 +76,8 @@ interface FakePi {
   failSend: boolean;
   sentUserMessages: unknown[];
   setModels: unknown[];
+  thinking: string;
+  activeCtx: any;
   notified: RecordedNotify[];
   api: any;
 }
@@ -74,6 +96,8 @@ function createFakePi(): FakePi {
     failSend: false,
     sentUserMessages: [],
     setModels: [],
+    thinking: "high",
+    activeCtx: undefined,
     notified: [],
     api: undefined,
   };
@@ -117,7 +141,13 @@ function createFakePi(): FakePi {
     },
     setModel: (...args: unknown[]) => {
       fake.setModels.push(args);
+      if (fake.activeCtx) fake.activeCtx.model = args[0];
       return Promise.resolve(true);
+    },
+    getThinkingLevel: () => fake.thinking,
+    setThinkingLevel: (thinking: string) => {
+      fake.thinking = thinking;
+      if (fake.activeCtx) fake.activeCtx.thinkingLevel = thinking;
     },
     sendMessage: () => {
       throw new Error("sendMessage must not be called");
@@ -136,6 +166,7 @@ interface FakeCtxOptions {
   model?: { provider: string; id: string } | undefined;
   notified?: RecordedNotify[];
   notifyThrows?: boolean;
+  systemPrompt?: string;
 }
 
 function createToolCtx(options: FakeCtxOptions = {}): any {
@@ -160,6 +191,9 @@ function createToolCtx(options: FakeCtxOptions = {}): any {
       },
     },
     model: options.model === undefined ? { provider: "anthropic", id: "claude-x" } : options.model,
+    thinkingLevel: "high",
+    modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
+    getSystemPrompt: () => options.systemPrompt ?? "Root system prompt",
     getContextUsage: typeof usage === "function" ? usage : () => usage,
     ui: {
       notify: (message: string, level?: string) => {
@@ -408,13 +442,13 @@ describe("pi handover tool", () => {
     await assert.rejects(() => store(fake, "h", "s", ctx), /failed to store handover/);
   });
 
-  it("ephemeral sessions get honest memory-only wording", async () => {
+  it("ephemeral sessions get persistent shared-storage wording", async () => {
     const fake = createFakePi();
     createExtension(fake.api);
     const session = createSessionManager({ sessionFile: undefined });
     const ctx = createToolCtx({ session });
     const result = await store(fake, "h", "s", ctx);
-    assert.ok(((result.content[0] as { text: string }).text as string).includes("memory only"));
+    assert.ok(((result.content[0] as { text: string }).text as string).includes("private shared copy"));
   });
 
   it("readback returns the latest active-branch handover plus diagnostics", async () => {
@@ -454,6 +488,14 @@ describe("pi handover tool", () => {
     const result = await fake.tools.get("read_handover").execute("t1", {}, undefined, undefined, ctx);
     assert.ok(((result.content[0] as { text: string }).text as string).includes("No handover stored"));
   });
+});
+
+const verifiedFresh = () => ({
+  model: { provider: "anthropic", id: "claude-x" },
+  thinkingLevel: "high",
+  sessionManager: { getBranch: () => [entry("restored", "auto-context-handover:restore", {
+    sourceSession: "sess-1", selection: { provider: "anthropic", model: "claude-x", thinking: "high" },
+  })] },
 });
 
 describe("pi /handover command", () => {
@@ -517,6 +559,7 @@ describe("pi /handover command", () => {
         },
       },
       model: { provider: "anthropic", id: "claude-x" },
+      getSystemPrompt: () => "Root system prompt",
       getContextUsage: () => validUsage(10, 200000),
       waitForIdle: async () => {
         h.waited = true;
@@ -599,6 +642,7 @@ describe("pi /handover command", () => {
     const freshSends: unknown[] = [];
     const freshNotifies: RecordedNotify[] = [];
     await options.withSession({
+      ...verifiedFresh(),
       sendUserMessage: async (text: unknown) => {
         freshSends.push(text);
       },
@@ -727,6 +771,7 @@ describe("pi /handover command", () => {
     const options = h.newSessionCalls[0];
     const freshNotifies: RecordedNotify[] = [];
     await options.withSession({
+      ...verifiedFresh(),
       sendUserMessage: async () => {
         throw new Error("kickoff boom");
       },
@@ -756,6 +801,7 @@ describe("pi /handover command", () => {
     await assert.rejects(
       () =>
         options.withSession({
+          ...verifiedFresh(),
           sendUserMessage: async () => {
             throw new Error("kickoff boom");
           },
@@ -913,5 +959,211 @@ describe("pi automatic rollover", () => {
       () => settle(stale.fake, stale.ctx),
       /automatic rollover dispatch failed[\s\S]*run \/handover[\s\S]*stale ctx/,
     );
+  });
+});
+
+describe("pi shared child handovers", () => {
+  const store = async (fake: FakePi, ctx: any, handover = "full child handover", summary = "unfinished step") =>
+    fake.tools.get("context_handover").execute("write", { handover, summary }, undefined, undefined, ctx);
+
+  it("hands back an ephemeral foreground child without terminating or rolling over, and closes later tools across reload", async () => {
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const session = createSessionManager({ sessionId: "child-foreground", sessionFile: undefined });
+    const ctx = createToolCtx({ fake, session, systemPrompt: '<active_agent name="worker"/>\nTask' });
+    const intro = await emit(fake, "before_agent_start", { systemPrompt: ctx.getSystemPrompt() }, ctx);
+    assert.match(intro.message.content, /child session/);
+    await emit(fake, "context", { messages: [] }, Object.assign(ctx, { getContextUsage: () => validUsage(150000, 200000) }));
+    const notice = await emit(fake, "context", { messages: [] }, ctx);
+    assert.match(notice.messages.at(-1).content, /Children never roll over/);
+    const result = await store(fake, ctx, "verbatim\nfull text\n", "short summary");
+    assert.equal(result.terminate, undefined);
+    assert.match(result.content[0].text, /exactly the following text as your final message/);
+    assert.match(result.content[0].text, /Context handover \(incomplete\): short summary/);
+    assert.ok(result.content[0].text.includes('read_handover({"sessionID":"child-foreground"})'));
+    assert.match(result.content[0].text, /Prioritized next steps/);
+    await emit(fake, "agent_settled", { aborted: false }, ctx);
+    assert.deepEqual(fake.sentUserMessages, []);
+    await assert.rejects(() => store(fake, ctx, "overwrite"), /do no further work/);
+    const reloaded = createFakePi();
+    createExtension(reloaded.api);
+    const toolGate = await emit(reloaded, "tool_call", { toolName: "bash" }, ctx);
+    assert.equal(toolGate.block, true);
+    assert.match(toolGate.reason, /short summary/);
+    await assert.rejects(() => reloaded.tools.get("read_handover").execute("r", {}, undefined, undefined, ctx), /do no further work/);
+    const parentCtx = createToolCtx({ session: createSessionManager({ sessionId: "parent" }) });
+    const read = await reloaded.tools.get("read_handover").execute("r", { sessionID: session.sessionId }, undefined, undefined, parentCtx);
+    assert.equal(read.content[0].text.split("verbatim\nfull text\n").length - 1, 1);
+    assert.equal(read.details.sessionId, session.sessionId);
+  });
+
+  it("recognizes background children and does not confuse root predecessor links with children", async () => {
+    process.env.PI_SUBAGENT_CHILD = "1";
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const ctx = createToolCtx({ fake, session: createSessionManager({ sessionId: "background" }) });
+    assert.equal((await store(fake, ctx)).terminate, undefined);
+    delete process.env.PI_SUBAGENT_CHILD;
+    const rootSession = createSessionManager({ sessionId: "root-successor" });
+    const rootCtx = createToolCtx({ fake, session: rootSession });
+    rootCtx.sessionManager.getHeader = () => ({ parentSession: "predecessor" });
+    assert.equal((await store(fake, rootCtx)).terminate, true);
+    await emit(fake, "agent_settled", { aborted: false }, rootCtx);
+    assert.equal(fake.sentUserMessages.length, 1);
+  });
+
+  it("writes hashed private atomic records, retains only the latest ID value, and accepts IDs rather than paths", async () => {
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const sessionID = "../../untrusted/session";
+    const ctx = createToolCtx({ fake, session: createSessionManager({ sessionId: sessionID, sessionFile: undefined }) });
+    await store(fake, ctx, "first");
+    await store(fake, ctx, "second\nverbatim");
+    const directory = join(agentDirectory, "auto-context-handover");
+    const files = await readdir(directory);
+    const expected = `${createHash("sha256").update(sessionID).digest("hex")}.json`;
+    assert.deepEqual(files, [expected]);
+    assert.equal((await stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await stat(join(directory, expected))).mode & 0o777, 0o600);
+    const data = JSON.parse(await readFile(join(directory, expected), "utf8"));
+    assert.equal(data.handover, "second\nverbatim");
+    assert.equal(data.sessionId, sessionID);
+    const parent = createToolCtx({ session: createSessionManager({ sessionId: "other" }) });
+    const reader = fake.tools.get("read_handover");
+    assert.equal((await reader.execute("r", { sessionID }, undefined, undefined, parent)).details.stored, true);
+    assert.equal((await reader.execute("r", { sessionID: join(directory, expected) }, undefined, undefined, parent)).details.stored, false);
+    await writeFile(join(directory, expected), JSON.stringify({ ...data, sessionId: "different" }));
+    await assert.rejects(() => reader.execute("r", { sessionID }, undefined, undefined, parent), /invalid shared handover/);
+    await writeFile(join(directory, expected), "invalid JSON");
+    await assert.rejects(() => reader.execute("r", { sessionID }, undefined, undefined, parent));
+  });
+
+  it("keeps an open root usable and repairable after corruption while retaining a closed child's branch refusal", async () => {
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const rootSession = createSessionManager({ sessionId: "repairable-root" });
+    const ctx = createToolCtx({ fake, session: rootSession });
+    await store(fake, ctx, "original");
+    const path = join(agentDirectory, "auto-context-handover", `${createHash("sha256").update(rootSession.sessionId).digest("hex")}.json`);
+    await writeFile(path, "corrupt");
+    assert.equal(await emit(fake, "tool_call", { toolName: "bash" }, ctx), undefined);
+    const branchRead = await fake.tools.get("read_handover").execute("r", {}, undefined, undefined, ctx);
+    assert.match(branchRead.content[0].text, /original/);
+    await store(fake, ctx, "repaired");
+    assert.equal(JSON.parse(await readFile(path, "utf8")).handover, "repaired");
+
+    const childSession = createSessionManager({ sessionId: "closed-child" });
+    const childCtx = createToolCtx({ fake, session: childSession, systemPrompt: '<active_agent name="worker"/>' });
+    await store(fake, childCtx);
+    const childPath = join(agentDirectory, "auto-context-handover", `${createHash("sha256").update(childSession.sessionId).digest("hex")}.json`);
+    await writeFile(childPath, "corrupt");
+    const reload = createFakePi();
+    createExtension(reload.api);
+    const unmarkedCtx = createToolCtx({ session: childSession });
+    const gate = await emit(reload, "tool_call", { toolName: "bash" }, unmarkedCtx);
+    assert.equal(gate.block, true);
+    assert.match(gate.reason, /Context handover \(incomplete\)/);
+  });
+
+  it("does not request rollover or claim success when shared storage is inaccessible", async () => {
+    await writeFile(join(agentDirectory, "auto-context-handover"), "not a directory");
+    const fake = createFakePi();
+    createExtension(fake.api);
+    const notifications: RecordedNotify[] = [];
+    const ctx = createToolCtx({ fake, notified: notifications });
+    await assert.rejects(() => store(fake, ctx), /no continuation requested/);
+    await emit(fake, "agent_settled", { aborted: false }, ctx);
+    assert.deepEqual(fake.sentUserMessages, []);
+    assert.equal(await emit(fake, "tool_call", { toolName: "bash" }, ctx), undefined);
+    const intro = await emit(fake, "before_agent_start", { systemPrompt: ctx.getSystemPrompt() }, ctx);
+    assert.match(intro.message.content, /root session/);
+    assert.equal(notifications.filter((notice) => notice.level === "warning").length, 1);
+    const childCtx = createToolCtx({ systemPrompt: '<active_agent name="worker"/>' });
+    const childGate = await emit(fake, "tool_call", { toolName: "bash" }, childCtx);
+    assert.equal(childGate.block, true);
+    assert.match(childGate.reason, /cannot verify session completion state/);
+  });
+});
+
+describe("pi successor model preservation", () => {
+  const setup = async (thinking = "high", mislabeledRoot = false) => {
+    const old = createFakePi();
+    createExtension(old.api);
+    old.thinking = thinking;
+    const selection = { provider: "chosen-provider", model: "chosen-model", thinking };
+    const source = createSessionManager({ branch: [entry("h", ENTRY_TYPE, {
+      handover: "continue", summary: "next", sessionId: "sess-1", model: { provider: "older", id: "stale" }, closed: mislabeledRoot,
+    })] });
+    const options: any[] = [];
+    const systemPrompt = mislabeledRoot ? '<active_agent name="inherited-marker"/>' : undefined;
+    const ctx = createToolCtx({ fake: old, session: source, model: { provider: selection.provider, id: selection.model }, systemPrompt });
+    Object.assign(ctx, { waitForIdle: async () => {}, newSession: async (option: any) => { options.push(option); return { cancelled: false }; } });
+    await old.commands.get("handover").handler("", ctx);
+    const successor = createSessionManager({ sessionId: "successor" });
+    await options[0].setup({ appendMessage: () => "seed", appendCustomEntry: (type: string, data: unknown) => {
+      successor.branch.push(entry("meta", type, data)); return "meta";
+    } });
+    const fresh = createFakePi();
+    createExtension(fresh.api);
+    fresh.thinking = "off";
+    const notifications: RecordedNotify[] = [];
+    const freshCtx = createToolCtx({ fake: fresh, session: successor, model: { provider: "default", id: "default" }, notified: notifications, systemPrompt });
+    freshCtx.thinkingLevel = "off";
+    fresh.activeCtx = freshCtx;
+    const sends: string[] = [];
+    freshCtx.sendUserMessage = async (text: string) => { sends.push(text); };
+    // Any accidental old-instance access after replacement must fail.
+    old.api.setModel = () => { throw new Error("stale old model API"); };
+    old.api.getThinkingLevel = () => { throw new Error("stale old thinking API"); };
+    return { selection, fresh, freshCtx, options: options[0], sends, notifications };
+  };
+
+  it("restores model then thinking using the new instance before kickoff, once only", async () => {
+    const h = await setup("xhigh");
+    const calls: string[] = [];
+    const setModel = h.fresh.api.setModel;
+    h.fresh.api.setModel = async (...args: unknown[]) => { calls.push("model"); return setModel(...args); };
+    const setThinking = h.fresh.api.setThinkingLevel;
+    h.fresh.api.setThinkingLevel = (level: string) => { calls.push("thinking"); setThinking(level); };
+    await emit(h.fresh, "session_start", { reason: "new" }, h.freshCtx);
+    assert.deepEqual(calls, ["model", "thinking"]);
+    assert.equal(h.freshCtx.model.provider, h.selection.provider);
+    assert.equal(h.freshCtx.thinkingLevel, "xhigh");
+    await h.options.withSession(h.freshCtx);
+    assert.equal(h.sends.length, 1);
+    await emit(h.fresh, "session_start", { reason: "new" }, h.freshCtx);
+    assert.equal(h.fresh.setModels.length, 1);
+    const reload = createFakePi();
+    createExtension(reload.api);
+    await emit(reload, "session_start", { reason: "reload" }, h.freshCtx);
+    await emit(reload, "session_start", { reason: "resume" }, h.freshCtx);
+    await emit(reload, "session_start", { reason: "startup" }, h.freshCtx);
+    assert.equal(reload.setModels.length, 0);
+  });
+
+  it("manual command recovers a mislabeled closed root and restores selection despite inherited child signals", async () => {
+    process.env.PI_SUBAGENT_CHILD = "1";
+    const h = await setup("medium", true);
+    await emit(h.fresh, "session_start", { reason: "new" }, h.freshCtx);
+    await h.options.withSession(h.freshCtx);
+    assert.equal(h.sends.length, 1);
+    assert.equal(h.freshCtx.model.id, h.selection.model);
+    assert.equal(h.freshCtx.thinkingLevel, "medium");
+  });
+
+  it("withholds kickoff for unavailable models, failed restoration, or unverified settings", async () => {
+    for (const failure of ["missing", "auth", "throw", "thinking", "missing-event", "changed-model", "changed-thinking"]) {
+      const h = await setup();
+      if (failure === "missing") h.freshCtx.modelRegistry.find = () => undefined;
+      if (failure === "auth") h.fresh.api.setModel = async () => false;
+      if (failure === "throw") h.fresh.api.setModel = async () => { throw new Error("model boom"); };
+      if (failure === "thinking") h.fresh.api.setThinkingLevel = () => {};
+      if (failure !== "missing-event") await emit(h.fresh, "session_start", { reason: "new" }, h.freshCtx);
+      if (failure === "changed-model") h.freshCtx.model = { provider: "default", id: "default" };
+      if (failure === "changed-thinking") h.freshCtx.thinkingLevel = "off";
+      await h.options.withSession(h.freshCtx);
+      assert.deepEqual(h.sends, [], failure);
+      assert.ok(h.notifications.some((notice) => notice.level === "error"), failure);
+    }
   });
 });

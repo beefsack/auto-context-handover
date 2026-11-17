@@ -1,15 +1,8 @@
-// auto-context-handover: Pi root-session extension (no build step).
-// Root sessions only: measured soft-limit advisories, a model-written
-// handover kept in extension storage, and automatic rollover after the
-// storing turn settles. /handover remains the manual fallback.
-// No subagent integration, no hard gate, no lock, no compaction changes.
-//
-// Persistence note: pi.appendEntry() writes a session custom entry, which
-// does NOT participate in LLM context. It is durable only when the session
-// itself is backed by a session file; ephemeral sessions (no session file)
-// hold it in memory only. Tool and command text say so honestly.
-
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+// Pi extension: automatic root continuation and parent-directed child handback.
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, chmod, readFile, rename, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { Type } from "typebox";
 import { parseThreshold, type ThresholdSpec } from "../source/shared/threshold.ts";
 import { resolveSoftTokens } from "../source/measure.ts";
@@ -33,6 +26,59 @@ const FLAG_NAME = "handover-soft";
 const ENTRY_TYPE = "auto-context-handover";
 const META_TYPE = "auto-context-handover:seed";
 const INTRO_TYPE = "auto-context-handover:intro";
+const RESTORE_TYPE = "auto-context-handover:restore";
+
+// UI mode and parentSession are not child identity: SDK sessions can have
+// either UI mode, and root successors also have parentSession. pi-subagents
+// supplies the active_agent tag in both prompt modes, including memory-only
+// children. Other child runtimes must supply that tag or the background flag.
+function isChild(ctx: ExtensionContext, prompt = ctx.getSystemPrompt()): boolean {
+  return process.env.PI_SUBAGENT_CHILD === "1" || /<active_agent\s+name="[^"]*"\s*\/>/.test(prompt);
+}
+
+const storePath = (sessionID: string): string =>
+  join(getAgentDir(), "auto-context-handover", `${createHash("sha256").update(sessionID).digest("hex")}.json`);
+
+async function readShared(sessionID: string): Promise<Record<string, unknown> | undefined> {
+  let text: string;
+  try {
+    text = await readFile(storePath(sessionID), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  const data: unknown = JSON.parse(text);
+  if (!isRecord(data) || data.sessionId !== sessionID || typeof data.handover !== "string" ||
+      typeof data.summary !== "string" || typeof data.closed !== "boolean") throw new Error("invalid shared handover record");
+  return data;
+}
+
+async function writeShared(sessionID: string, data: Record<string, unknown>): Promise<void> {
+  const directory = join(getAgentDir(), "auto-context-handover");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700);
+  const path = storePath(sessionID);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(data), { mode: 0o600, flag: "wx" });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+function childReply(summary: string, sessionID: string): string {
+  const reader = `read_handover({"sessionID":${JSON.stringify(sessionID)}})`;
+  return `Context handover (incomplete): ${summary}\nPredecessor session: ${sessionID}.\n` +
+    `Parent: read the full handover with ${reader}. Spawn a replacement of the same agent type with your original steering/model choices; ` +
+    `tell it to call ${reader} and continue from "Prioritized next steps". Do not paste the full handover into its prompt. ` +
+    `The successor replaces this predecessor as the same logical subagent, not an additional agent under subagent-count limits. ` +
+    `Check in with the user if progress stalls or remaining work grows.`;
+}
+
+const childDirective = (data: Record<string, unknown>): string =>
+  `Handover stored; do no further work or tool calls. End your turn now with exactly the following text as your final message and then stop.\n\n` +
+  childReply(String(data.summary), String(data.sessionId));
 
 const DEFAULT_SOFT = 200000;
 
@@ -105,14 +151,22 @@ const TOOL_DESCRIPTION =
   `Pass the FULL handover text VERBATIM in "handover" (it is stored and replayed word for word, never summarized or reworded) ` +
   `plus a short status/outcome/next-step summary in "summary".\n\n` +
   `${PI_HANDOVER_SECTIONS}\n\n` +
-  `Once stored, end your turn: a fresh session is opened automatically after this turn settles, seeded from this text, ` +
+  `For child sessions, storage closes this session to further tools: emit the exact final continuation reply from the tool result so the parent can read and replace you manually. Never create your own successor. ` +
+  `For top-level sessions, once stored, end your turn: a fresh session is opened automatically after this turn settles, seeded from this text, ` +
   `and a continuation prompt is sent there. If that does not happen, the user can run /handover instead. ` +
   `Calling this tool again later after resumed work replaces the stored handover. Do not paste secrets.`;
 
 const READ_DESCRIPTION =
-  `Read the handover stored in the current session branch. ` +
-  `Takes no arguments and cannot read other sessions or files. ` +
+  `Read a retained handover by sessionID, including a predecessor child or another session. ` +
+  `Omit sessionID to read the current session branch (legacy compatibility). No filesystem paths are accepted. ` +
   `Returns the verbatim stored text plus a diagnostics header, or a plain notice when nothing is stored yet.`;
+
+const CHILD_INTRO =
+  `auto-context-handover is active for this child session. When a soft-limit advisory appears, finish the current step, ` +
+  `then call context_handover with the full handover and short summary. This replaces any required final report for this session; ` +
+  `the private extension-storage write is allowed under read-only instructions. After storage, do no more work: ` +
+  `return the exact final continuation reply supplied by the tool so the parent can read your handover and spawn a replacement with steering. ` +
+  `Children never roll over automatically; do not run /handover or create sessions.`;
 
 const INTRO_TEXT =
   `auto-context-handover is active for this root session. ` +
@@ -226,6 +280,44 @@ export default function (pi: ExtensionAPI): void {
   const diagBySession = new Map<string, CallDiag>();
   let run = 0;
   let pending: PendingRoll | undefined;
+  const restoreAttempts = new Set<string>();
+  const warnedStorage = new Set<string>();
+
+  async function readOwnState(ctx: ExtensionContext): Promise<Record<string, unknown> | undefined> {
+    const sessionID = ctx.sessionManager.getSessionId();
+    try {
+      return await readShared(sessionID);
+    } catch (error) {
+      // A retained branch closure remains authoritative if its shared copy
+      // cannot be read. Otherwise storage damage must not brick an open root.
+      try {
+        const closed = [...ctx.sessionManager.getBranch()].reverse().find((entry) => entry.type === "custom" &&
+          entry.customType === ENTRY_TYPE && isRecord(entry.data) && entry.data.sessionId === sessionID && entry.data.closed === true);
+        if (closed?.type === "custom" && isRecord(closed.data)) return closed.data;
+      } catch {
+        // A broken branch must not turn unrelated root tools into a hard gate.
+      }
+      if (isChild(ctx)) throw error;
+      if (!warnedStorage.has(sessionID)) {
+        warnedStorage.add(sessionID);
+        try {
+          ctx.ui.notify(`auto-context-handover: cannot read shared completion state; root tools remain available and /handover can recover the branch handover. ${(error as Error).message}`, "warning");
+        } catch {
+          // Recovery must not depend on a working UI notification.
+        }
+      }
+      return undefined;
+    }
+  }
+
+  pi.on("tool_call", async (_event, ctx) => {
+    try {
+      const stored = await readOwnState(ctx);
+      if (stored?.closed === true) return { block: true, reason: childDirective(stored) };
+    } catch (error) {
+      return { block: true, reason: `auto-context-handover: cannot verify session completion state: ${(error as Error).message}` };
+    }
+  });
 
   pi.on("agent_start", () => {
     run += 1;
@@ -241,16 +333,41 @@ export default function (pi: ExtensionAPI): void {
   // Trusted per-turn introduction. The host persists the returned custom
   // message into the session; this handler only authors it and never
   // rewrites the initial system prefix.
-  pi.on("before_agent_start", async () => {
-    return {
-      message: { customType: INTRO_TYPE, content: INTRO_TEXT, display: false },
-    };
+  pi.on("before_agent_start", async (event, ctx) => {
+    const stored = await readOwnState(ctx);
+    const content = stored?.closed === true ? childDirective(stored) :
+      isChild(ctx, event.systemPrompt) ? CHILD_INTRO : INTRO_TEXT;
+    return { message: { customType: INTRO_TYPE, content, display: false } };
   });
 
   // Explicit flag validation. An invalid value is reported here, once per
   // session start, so the silent context hook below never substitutes
   // another threshold. Pi surfaces the notification without crashing.
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
+    const sessionID = ctx.sessionManager.getSessionId();
+    if (event.reason === "new" && !restoreAttempts.has(sessionID)) {
+      const seed = [...ctx.sessionManager.getBranch()].reverse().find((entry) => entry.type === "custom" && entry.customType === META_TYPE);
+      const data = seed?.type === "custom" && isRecord(seed.data) ? seed.data : undefined;
+      const selection = data && isRecord(data.selection) ? data.selection : undefined;
+      if (selection) {
+        restoreAttempts.add(sessionID);
+        try {
+          const model = ctx.modelRegistry.find(String(selection.provider), String(selection.model));
+          if (!model || !await pi.setModel(model)) throw new Error("predecessor model unavailable or not authenticated");
+          const thinking = selection.thinking;
+          if (thinking !== "off" && thinking !== "minimal" && thinking !== "low" && thinking !== "medium" && thinking !== "high" && thinking !== "xhigh") {
+            throw new Error("invalid predecessor thinking level");
+          }
+          pi.setThinkingLevel(thinking);
+          if (pi.getThinkingLevel() !== thinking || ctx.model?.provider !== selection.provider || ctx.model?.id !== selection.model) {
+            throw new Error("predecessor model/thinking restoration did not stick");
+          }
+          pi.appendEntry(RESTORE_TYPE, { sourceSession: data?.sourceSession, selection });
+        } catch (error) {
+          reportHostError(ctx, `auto-context-handover: successor model/thinking restoration failed; continuation withheld. ${(error as Error).message}`, error);
+        }
+      }
+    }
     const raw = pi.getFlag(FLAG_NAME);
     const { error } = flagSpec(raw);
     if (error === undefined) return;
@@ -276,7 +393,9 @@ export default function (pi: ExtensionAPI): void {
       const stage = estimate !== "unknown" && soft !== undefined ? softStage(estimate, soft) : "unknown";
       diagBySession.set(sessionId, { stage, estimate, soft: soft ?? "unknown" });
       if (stage === "ok" || stage === "unknown") return;
-      const notice = `${openCodeStageText(stage)}${NOTICE_SUFFIX}`;
+      const stored = await readOwnState(ctx);
+      const notice = stored?.closed === true ? childDirective(stored) :
+        `${openCodeStageText(stage)}${isChild(ctx) ? ` ${CHILD_INTRO}` : NOTICE_SUFFIX}`;
       return { messages: [...event.messages, { role: "user", content: notice, timestamp: Date.now() }] };
     } catch {
       // Fail open: measurement or host trouble never touches the request.
@@ -352,6 +471,9 @@ export default function (pi: ExtensionAPI): void {
         throw new Error(`auto-context-handover: "summary" must be a short status/outcome/next-step summary, non-empty`);
       }
       const sessionId = ctx.sessionManager.getSessionId();
+      const existing = await readOwnState(ctx);
+      if (existing?.closed === true) throw new Error(childDirective(existing));
+      const child = isChild(ctx);
       const observed = diagBySession.get(sessionId);
       const diag = {
         reason:
@@ -371,29 +493,32 @@ export default function (pi: ExtensionAPI): void {
         },
         storedAt: Date.now(),
         diag,
+        closed: child,
       };
+      pending = undefined;
       try {
         pi.appendEntry(ENTRY_TYPE, payload);
+        await writeShared(sessionId, payload);
       } catch (error) {
         throw new Error(
-          `auto-context-handover: failed to store handover, nothing was handed over: ${(error as Error).message}`,
+          `auto-context-handover: failed to store handover in shared storage; no continuation requested (a branch entry may remain): ${(error as Error).message}`,
         );
       }
       // Only a successful storage creates a rollover request. A reload or an
       // older handover entry never starts one on its own.
+      if (child) {
+        pending = undefined;
+        return { content: [{ type: "text", text: childDirective(payload) }], details: { sessionId, stored: true } };
+      }
       pending = {
         run,
         sessionId,
         sessionFile: ctx.sessionManager.getSessionFile(),
         handoverEntryId: ctx.sessionManager.getLeafId() ?? undefined,
       };
-      const ephemeral = ctx.sessionManager.getSessionFile() === undefined;
       const text =
         `Handover stored for session ${sessionId}. End your turn now; a fresh seeded session opens automatically once this turn settles. ` +
-        `If it does not, run /handover from this session.` +
-        (ephemeral
-          ? ` Note: this session has no session file, so the handover is held in memory only and will not survive a restart.`
-          : ``);
+        `If it does not, run /handover from this session. A private shared copy survives memory-only sessions.`;
       return { content: [{ type: "text", text }], details: { sessionId, stored: true }, terminate: true };
     },
   });
@@ -402,9 +527,14 @@ export default function (pi: ExtensionAPI): void {
     name: READ_TOOL_NAME,
     label: "Read Handover",
     description: READ_DESCRIPTION,
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const lookup = latestHandover(ctx.sessionManager.getBranch() as unknown as ReadonlyArray<Record<string, unknown>>);
+    parameters: Type.Object({ sessionID: Type.Optional(Type.String({ minLength: 1 })) }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const own = await readOwnState(ctx);
+      if (own?.closed === true) throw new Error(childDirective(own));
+      const shared = params.sessionID === undefined ? undefined : await readShared(params.sessionID);
+      const lookup = params.sessionID === undefined
+        ? latestHandover(ctx.sessionManager.getBranch() as unknown as ReadonlyArray<Record<string, unknown>>)
+        : latestHandover(shared ? [{ type: "custom", customType: ENTRY_TYPE, data: shared }] : []);
       if (!lookup.found) {
         return {
           content: [
@@ -412,7 +542,7 @@ export default function (pi: ExtensionAPI): void {
               type: "text",
               text: lookup.invalidLatest
                 ? `The latest stored handover entry in the current session branch is invalid; refusing to fall back to an older entry. Store a fresh handover with the context_handover tool.`
-                : `No handover stored in the current session branch yet.`,
+                : `No handover stored ${params.sessionID === undefined ? "in the current session branch" : `for session ${params.sessionID}`} yet.`,
             },
           ],
           details: { stored: false, invalidLatest: lookup.invalidLatest },
@@ -430,6 +560,8 @@ export default function (pi: ExtensionAPI): void {
   pi.registerCommand(COMMAND_NAME, {
     description: "Manual fallback: continue the stored session handover in a fresh session. Requires a stored handover; takes no arguments.",
     handler: async (args, ctx) => {
+      // Commands are an explicit user recovery path, not model tool calls.
+      // Child heuristics must not disable manual recovery of a mislabeled root.
       if (args.trim().length > 0) {
         ctx.ui.notify("auto-context-handover: /handover takes no arguments", "error");
         return;
@@ -481,6 +613,11 @@ export default function (pi: ExtensionAPI): void {
       const summary = stored.summary;
       const sourceId = ctx.sessionManager.getSessionId();
       const parentSession = ctx.sessionManager.getSessionFile();
+      if (!ctx.model) {
+        ctx.ui.notify("auto-context-handover: cannot snapshot predecessor model; refusing replacement", "error");
+        return;
+      }
+      const selection = { provider: ctx.model.provider, model: ctx.model.id, thinking: pi.getThinkingLevel() };
       const window = readEstimate(ctx).window;
       const seedText =
         `Continuing work handed over from session ${sourceId}. ` +
@@ -513,11 +650,20 @@ export default function (pi: ExtensionAPI): void {
               sourceFile: parentSession ?? null,
               storedAt: Date.now(),
               summary,
+              selection,
             });
           },
           withSession: async (fresh) => {
             // Only the fresh replacement context is session-bound here.
             try {
+              const restored = fresh.sessionManager.getBranch().some((entry) => entry.type === "custom" &&
+                entry.customType === RESTORE_TYPE && isRecord(entry.data) && entry.data.sourceSession === sourceId &&
+                isRecord(entry.data.selection) && entry.data.selection.provider === selection.provider &&
+                entry.data.selection.model === selection.model && entry.data.selection.thinking === selection.thinking);
+              if (!restored || fresh.model?.provider !== selection.provider || fresh.model?.id !== selection.model ||
+                  fresh.thinkingLevel !== selection.thinking) {
+                throw new Error("predecessor model/thinking not verified; refusing continuation on a default model");
+              }
               await fresh.sendUserMessage(kickoff);
             } catch (error) {
               reportHostError(
